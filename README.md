@@ -49,6 +49,56 @@
     *   🎨 **代码风格统一:**  代码风格规范，易于阅读和协作。
     *   🔒 **安全性考虑:**  具备用户权限控制，保障机器人安全运行。
 
+## 📂 项目目录结构
+
+```bash
+telegram-bot-gemini/
+├── config/                      # 配置文件目录
+│   ├── knowledge-base-v2.json   # (可选) 更高级的知识库配置 (目前未使用)
+│   └── model-prompt.json        # (可选) 模型 Prompt 配置 (目前未使用)
+├── kv/                          # Cloudflare KV 命名空间配置 (系统提示等)
+│   ├── system_prompt.json       # 默认系统提示 (JSON 格式)
+│   ├── system_prompt-lite.json  # (可选) 简化的系统提示 (JSON 格式，目前未使用)
+│   └── system_search_prompt.json# Google 搜索功能系统提示 (JSON 格式)
+├── LICENSE                      # 开源许可证文件 (MIT License)
+├── package.json                 # 项目依赖和脚本配置
+├── package-lock.json            # 锁定依赖版本 (npm)
+├── README.md                    # 项目自述文件 (当前文件)
+├── src/                         # 源代码目录
+│   ├── gemini.js                # Gemini API 客户端初始化和封装
+│   ├── handlers/                # 消息处理器目录
+│   │   ├── command-handler.js   # Bot 命令消息处理器 (如 /start, /help 等)
+│   │   ├── image-handler.js     # 图片消息处理器
+│   │   └── search-handler.js    # Google 搜索命令消息处理器 (/search)
+│   ├── index.js                 # Cloudflare Worker 入口文件 (消息处理主逻辑)
+│   ├── storage/                 # 数据存储相关模块
+│   │   └── context-storage.js   # 对话上下文存储和管理 (Cloudflare KV)
+│   ├── utils/                   # 工具函数目录
+│   │   ├── cooldown.js          # 冷却时间管理 (群组冷却, 搜索冷却)
+│   │   └── formatter.js         # 消息格式化工具 (HTML 格式化)
+│   │   └── utils.js             # 通用工具函数 (KV 读写, 白名单管理等)
+│   └── utils.js                 # 通用工具函数 (KV 读写, 白名单管理等)
+├── vitest.config.js           # Vitest 单元测试配置 (目前未使用)
+└── wrangler.json                # Cloudflare Wrangler 配置文件 (Workers 部署配置)
+```
+
+**目录结构说明:**
+
+*   **`config/`**: 存放项目配置文件，例如知识库配置、模型 Prompt 配置等。(目前部分配置未使用)
+*   **`kv/`**: 存放 Cloudflare KV 命名空间中使用的 JSON 格式的系统提示信息。
+*   **`src/`**: 项目的核心源代码目录，包含各种功能模块的实现。
+    *   **`gemini.js`**: 封装了 Gemini API 的客户端初始化和调用方法，方便在其他模块中使用。
+    *   **`handlers/`**: 存放各种消息处理器，例如命令处理器、图片处理器、搜索处理器等，负责处理不同类型的 Telegram 消息。
+    *   **`index.js`**: Cloudflare Worker 的入口文件，负责接收 Telegram Webhook 事件，并根据消息类型分发到不同的处理器进行处理。
+    *   **`storage/`**: 存放数据存储相关的模块，目前主要包含 `context-storage.js`，用于管理对话上下文的存储和读取。
+    *   **`utils/`**: 存放各种工具函数，例如冷却时间管理、消息格式化、KV 读写、白名单管理等，提供常用的辅助功能。
+*   **根目录文件:**
+    *   **`LICENSE`**:  项目的开源许可证文件，本项目使用 MIT License。
+    *   **`package.json` 和 `package-lock.json`**:  Node.js 项目的依赖管理文件，定义了项目所需的依赖包和版本信息。
+    *   **`README.md`**:  项目自述文件，包含项目介绍、功能特性、使用方法、开发说明、部署指南等重要信息。(当前文件)
+    *   **`vitest.config.js`**:  单元测试框架 Vitest 的配置文件 (目前项目尚未编写单元测试)。
+    *   **`wrangler.json`**:  Cloudflare Wrangler 的配置文件，用于配置 Workers 项目的名称、入口文件、环境变量、KV 命名空间绑定等部署信息。
+
 ### 🚧 已实现但未完善的功能
 
 *   **图片消息处理:**

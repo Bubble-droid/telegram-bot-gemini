@@ -77,7 +77,7 @@ telegram-bot-gemini/
 │   │   ├── cooldown.js            # 冷却时间管理 (群组冷却, 搜索冷却)
 │   │   └── formatter.js           # 消息格式化工具 (HTML 格式化)
 │   │   └── utils.js               # 通用工具函数 (KV 读写, 白名单管理等)
-│   └── utils.js                   # 通用工具函数 (KV 读写, 白名单管理等)
+│   └── utils.js                    # 通用工具函数 (KV 读写, 白名单管理等)
 ├── vitest.config.js                # Vitest 单元测试配置 (目前未使用)
 └── wrangler.json                   # Cloudflare Wrangler 配置文件 (Workers 部署配置)
 ```

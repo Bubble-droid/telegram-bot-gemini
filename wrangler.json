@@ -1,0 +1,45 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "telegram-bot-gemini",
+	"main": "src/index.js",
+	"compatibility_date": "2025-01-29",
+	"observability": {
+		"enabled": true
+	},
+	"vars": {
+		"BOT_TOKEN": "YOUR_BOT_TOKEN",
+    "GEMINI_API_KEY": "YOUR_GEMINI_API_KEY",
+		"OPENAI_API_BASE_URL": "https://generativelanguage.googleapis.com/v1beta/openai/",
+		"GEMINI_MODEL_NAME": "gemini-2.0-flash-001",
+		"DEFAULT_GEMINI_MODEL_NAME": "gemini-2.0-flash-001",
+		"TELEGRAM_BOT_NAME": "YourBotName",
+		"GROUP_WHITELIST_KV_KEY": "group_whitelist",
+		"USER_WHITELIST_KV_KEY": "user_whitelist",
+		"SYSTEM_PROMPT_KV_KEY": "system_prompt",
+		"SYSTEM_SEARCH_PROMPT_KV_KEY": "system_search_prompt",
+		"COOLDOWN_DURATION": "1.5m",
+		"SEARCH_COOLDOWN_DURATION": "3m"
+	},
+	"kv_namespaces": [
+		{
+			"binding": "SYSTEM_INIT_CONFIG",
+			"id": ""
+		},
+		{
+			"binding": "BOT_CONFIG",
+			"id": ""
+		},
+		{
+			"binding": "CONTEXT",
+			"id": ""
+		},
+		{
+			"binding": "IMAGE_DATA",
+			"id": ""
+		},
+		{
+			"binding": "TASK_QUEUE_KV",
+			"id": ""
+		}
+	]
+}

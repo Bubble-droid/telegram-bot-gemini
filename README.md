@@ -59,8 +59,8 @@ telegram-bot-gemini/
 ├── kv/                          # Cloudflare KV 命名空间配置 (系统提示等)
 │   ├── system_prompt.json       # 默认系统提示 (JSON 格式)
 │   ├── system_prompt-lite.json  # (可选) 简化的系统提示 (JSON 格式，目前未使用)
-│   └── system_search_prompt.json# Google 搜索功能系统提示 (JSON 格式)
-├── LICENSE                      # 开源许可证文件 (MIT License)
+│   └── system_search_prompt.json   # Google 搜索功能系统提示 (JSON 格式)
+├── LICENSE                          # 开源许可证文件 (MIT License)
 ├── package.json                 # 项目依赖和脚本配置
 ├── package-lock.json            # 锁定依赖版本 (npm)
 ├── README.md                    # 项目自述文件 (当前文件)
@@ -78,7 +78,7 @@ telegram-bot-gemini/
 │   │   └── formatter.js         # 消息格式化工具 (HTML 格式化)
 │   │   └── utils.js             # 通用工具函数 (KV 读写, 白名单管理等)
 │   └── utils.js                 # 通用工具函数 (KV 读写, 白名单管理等)
-├── vitest.config.js           # Vitest 单元测试配置 (目前未使用)
+├── vitest.config.js            # Vitest 单元测试配置 (目前未使用)
 └── wrangler.json                # Cloudflare Wrangler 配置文件 (Workers 部署配置)
 ```
 

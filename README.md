@@ -124,32 +124,48 @@ pnpm install # 或 npm install
 | --------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------ |
 | `BOT_TOKEN`                 | Telegram Bot 的 Token，通过 [BotFather](https://t.me/BotFather) 获取。 | `YOUR_BOT_TOKEN`                                                         |
 | `GEMINI_API_KEY`            | Google Gemini API 的 API Key，在 [Google AI Studio](https://makersuite.google.com/) 获取。 | `YOUR_GEMINI_API_KEY`                                                    |
-| `GROUP_WHITELIST_KV_KEY`    | KV 命名空间中，用于存储群组白名单的 Key。                               | `group_whitelist`                                                        |
-| `USER_WHITELIST_KV_KEY`     | KV 命名空间中，用于存储用户白名单 (命令白名单) 的 Key。                   | `user_whitelist`                                                         |
-| `SYSTEM_INIT_CONFIG_KV_KEY` | KV 命名空间中，用于存储系统初始化配置 (包括系统提示) 的 Key。             | `system_init`                                                            |
-| `COOLDOWN_DURATION`         | 群组消息冷却时间，例如 `1.5m` (1.5 分钟), `30s` (30 秒)。                  | `1.5m`                                                                   |
 | `OPENAI_API_BASE_URL`       | Gemini API 兼容 OpenAI 接口的 Base URL。                               | `https://generativelanguage.googleapis.com/v1beta/openai/`               |
-| `SYSTEM_PROMPT_KV_KEY`      | `SYSTEM_INIT_CONFIG_KV_KEY` KV 中，存储**默认系统提示**的 Key。             | `system_prompt`                                                          |
 | `GEMINI_MODEL_NAME`         | 默认使用的 Gemini 模型名称 (流式对话)。                                | `gemini-2.0-flash-001`                                                   |
 | `DEFAULT_GEMINI_MODEL_NAME` | 默认使用的 Gemini 模型名称 (非流式对话/命令处理)。                          | `gemini-2.0-flash-001`                                                   |
 | `TELEGRAM_BOT_NAME`         | Telegram Bot 的用户名 (不带 `@` 符号)。                                  | `YourBotName`                                                            |
-| `SEARCH_COOLDOWN_DURATION`    | Google 搜索功能冷却时间，例如 `3m` (3 分钟)。                             | `3m`                                                                     |
+| `GROUP_WHITELIST_KV_KEY`    | KV 命名空间中，用于存储群组白名单的 Key。                               | `group_whitelist`                                                        |
+| `USER_WHITELIST_KV_KEY`     | KV 命名空间中，用于存储用户白名单 (命令白名单) 的 Key。                   | `user_whitelist`                                                         |
+| `SYSTEM_PROMPT_KV_KEY`      | `SYSTEM_INIT_CONFIG_KV_KEY` KV 中，存储**默认系统提示**的 Key。             | `system_prompt`                                                          |
 | `SYSTEM_SEARCH_PROMPT_KV_KEY`| `SYSTEM_INIT_CONFIG_KV_KEY` KV 中，存储 **Google 搜索系统提示** 的 Key。      | `system_search_prompt`                                                     |
+| `COOLDOWN_DURATION`         | 群组消息冷却时间，例如 `1.5m` (1.5 分钟), `30s` (30 秒)。                  | `1.5m`                                                                   |
+| `SEARCH_COOLDOWN_DURATION`    | Google 搜索功能冷却时间，例如 `3m` (3 分钟)。                             | `3m`                                                                     |
 
 **请务必替换 `YOUR_BOT_TOKEN` 和 `YOUR_GEMINI_API_KEY` 为您自己的 Token 和 API Key。**
 
 ### KV 命名空间配置
 
-在 `wrangler.json` 文件中，配置 KV 命名空间绑定，确保 `binding` 名称与 `vars` 中配置的 KV Key 名称一致。
+在 `wrangler.json` 文件中，配置 KV 命名空间绑定，确保 `"binding"` 名称与 `vars` 中配置的 KV Key 名称一致。
 
 ```json
-kv_namespaces = [
-  { binding = "SYSTEM_INIT_CONFIG", id = "YOUR_SYSTEM_INIT_CONFIG_KV_NAMESPACE_ID" },
-  { binding = "BOT_CONFIG", id = "YOUR_BOT_CONFIG_KV_NAMESPACE_ID" },
-  { binding = "CONTEXT", id = "YOUR_CONTEXT_KV_NAMESPACE_ID" },
-  { binding = "IMAGE_DATA", id = "YOUR_IMAGE_DATA_KV_NAMESPACE_ID" },
-  { binding = "TASK_QUEUE_KV", id = "YOUR_TASK_QUEUE_KV_NAMESPACE_ID" }
-]
+{
+	"kv_namespaces": [
+		{
+			"binding": "SYSTEM_INIT_CONFIG",
+			"id": "YOUR_SYSTEM_INIT_CONFIG_KV_NAMESPACE_ID"
+		},
+		{
+			"binding": "BOT_CONFIG",
+			"id": "YOUR_BOT_CONFIG_KV_NAMESPACE_ID"
+		},
+		{
+			"binding": "CONTEXT",
+			"id": "YOUR_CONTEXT_KV_NAMESPACE_ID"
+		},
+		{
+			"binding": "IMAGE_DATA",
+			"id": "YOUR_IMAGE_DATA_KV_NAMESPACE_ID"
+		},
+		{
+			"binding": "TASK_QUEUE_KV",
+			"id": "YOUR_TASK_QUEUE_KV_NAMESPACE_ID"
+		}
+	]
+}
 ```
 
 **请务必替换 `YOUR_*_KV_NAMESPACE_ID` 为您在 Cloudflare 控制台中创建的 KV 命名空间的 ID。**
@@ -162,8 +178,8 @@ kv_namespaces = [
 
     ```json
     {
-      "role": "system",
-      "content": "You are a helpful assistant in a Telegram group, specializing in Sing-box and GUI.for.SingBox. Be concise and informative."
+        "role": "system",
+        "content": "You are a helpful assistant in a Telegram group, specializing in Sing-box and GUI.for.SingBox. Be concise and informative."
     }
     ```
 
@@ -171,7 +187,7 @@ kv_namespaces = [
 
     ```json
     {
-      "systemInstruction": "You are a helpful assistant, who answers questions using google search. Be concise and accurate."
+        "systemInstruction": "You are a helpful assistant, who answers questions using google search. Be concise and accurate."
     }
     ```
 

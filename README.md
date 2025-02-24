@@ -1,12 +1,7 @@
 # Telegram Bot Gemini 🤖💬
 
-<<<<<<< HEAD
 **一个基于 Cloudflare Workers 和 Gemini API 的 Telegram Bot，提供智能对话、Google 搜索等功能。**
 * **由 Gemini 提供代码支持。**
-=======
-**一个基于 Cloudflare Workers 和 Gemini API 的 Telegram Bot，提供智能对话、Google 搜索等功能。**
-* **由 Gemini 提供代码支持。**
->>>>>>> refs/remotes/origin/main
 
 ## ✨ 功能特性
 

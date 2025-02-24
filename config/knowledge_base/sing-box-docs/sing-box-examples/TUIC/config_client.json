@@ -1,0 +1,26 @@
+{
+    "inbounds": [
+        {
+            "type": "mixed",
+            "listen": "::",
+            "listen_port": 10000
+        }
+    ],
+    "outbounds": [
+        {
+            "type": "tuic",
+            "server": "",
+            "server_port": 443,
+            "uuid": "",
+            "password": "",
+            "congestion_control": "bbr",
+            "tls": {
+                "enabled": true,
+                "server_name": "",
+                "alpn": [
+                    "h3"
+                ]
+            }
+        }
+    ]
+}

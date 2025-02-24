@@ -169,9 +169,6 @@
 				},
 				"rules": {
 					"description": "Configuration for DNS rules.",
-					"default_fields": {
-						"description": "The default rule uses the following matching logic: (`domain` || `domain_suffix` || `domain_keyword` || `domain_regex` || `geosite`) && (`port` || `port_range`) && (`source_geoip` || `source_ip_cidr` ｜｜ `source_ip_is_private`) && (`source_port` || `source_port_range`) && `other fields`. Additionally, included rule-sets can be considered merged rather than as a single rule sub-item."
-					},
 					"fields": {
 						"inbound": {
 							"description": "Tags of [Inbound](/configuration/inbound/)."
@@ -297,6 +294,8 @@
 							"description": "See [DNS Rule Actions](../rule_action/) for details."
 						}
 					},
+					"rule_matching_order": "Rules are matched in a top-down order.",
+					"default_matching_logic": "The default rule uses the following matching logic:\n\n(domain || domain_suffix || domain_keyword || domain_regex || geosite || geoip || ip_cidr || ip_is_private) &&\n(port || port_range) &&\n(source_geoip || source_ip_cidr || source_ip_is_private) &&\n(source_port || source_port_range) &&\nother fields\n\nAdditionally, included rule-sets can be considered merged rather than as a single rule sub-item.",
 					"address_filter_fields": {
 						"description": "Only takes effect for address requests (A/AAAA/HTTPS). When the query results do not match the address filtering rule items, the current rule will be skipped. `ip_cidr` items in included rule-sets also takes effect as an address filtering field. Enable `experimental.cache_file.store_rdrc` to cache results.",
 						"fields": {
@@ -1909,6 +1908,8 @@
 							"deprecated": "Deprecated in sing-box 1.11.0"
 						}
 					},
+					"rule_matching_order": "Rules are matched in a top-down order.",
+					"default_matching_logic": "The default rule uses the following matching logic:\n\n(domain || domain_suffix || domain_keyword || domain_regex || geosite || geoip || ip_cidr || ip_is_private) &&\n(port || port_range) &&\n(source_geoip || source_ip_cidr || source_ip_is_private) &&\n(source_port || source_port_range) &&\nother fields\n\nAdditionally, included rule-sets can be considered merged rather than as a single rule sub-item.",
 					"logical_fields": {
 						"type": {
 							"description": "`logical`"
@@ -3538,7 +3539,9 @@
 													"**Clash 模式 (clash_mode)**：对应 Sing-Box 的 `route.rules.clash_mode` 字段，用于匹配 Clash 模式，指定所选工作模式的规则策略，`direct` 和 `global` 应分别设置为直连和代理出站，一般情况下默认即可。",
 													"**规则集 (rule_set)**：对应 Sing-Box 的 `route.rule.rule_set` 字段，用于匹配在规则集页面添加过的规则集。",
 													"**内联 (inline)**：使用多条件的复杂规则或逻辑规则时使用，可直接填写 json 内容"
-												]
+												],
+												"rule_matching_order": "Rules are matched in a top-down order.",
+												"default_matching_logic": "The default rule uses the following matching logic:\n\n(domain || domain_suffix || domain_keyword || domain_regex || geosite || geoip || ip_cidr || ip_is_private) &&\n(port || port_range) &&\n(source_geoip || source_ip_cidr || source_ip_is_private) &&\n(source_port || source_port_range) &&\nother fields\n\nAdditionally, included rule-sets can be considered merged rather than as a single rule sub-item."
 											},
 											{
 												"name": "规则动作",
@@ -4273,7 +4276,9 @@
 								"rule_set,GeoIP-CN,route,@ 全球直连",
 								"rule_set,GeoLocation-ICN,route,@ 节点选择"
 							],
-							"操作": "每个条目右侧都有编辑和删除按钮"
+							"操作": "每个条目右侧都有编辑和删除按钮",
+							"rule_matching_order": "Rules are matched in a top-down order.",
+							"default_matching_logic": "The default rule uses the following matching logic:\n\n(domain || domain_suffix || domain_keyword || domain_regex || geosite || geoip || ip_cidr || ip_is_private) &&\n(port || port_range) &&\n(source_geoip || source_ip_cidr || source_ip_is_private) &&\n(source_port || source_port_range) &&\nother fields\n\nAdditionally, included rule-sets can be considered merged rather than as a single rule sub-item."
 						},
 						"规则集": {
 							"列表": [
@@ -4838,6 +4843,109 @@
 							"按钮": "打开应用程序文件夹"
 						},
 						"内核缓存": "无"
+					}
+				}
+			},
+			{
+				"program_name": "GUI-for-Cores",
+				"purpose_and_functionality": {
+					"design_purpose": "快速生成核心配置文件，并通过用户界面（UI）展示和修改参数，提供合理的默认值。",
+					"features": [
+						"配置管理",
+						"订阅管理",
+						"规则组管理",
+						"插件系统",
+						"计划任务系统"
+					],
+					"disclaimer": "本程序不是VPN或代理软件，不提供任何代理功能。",
+					"development_info": {
+						"technology": "wails+vue3",
+						"compiled_size": "约10MB",
+						"compressed_size": "约5MB",
+						"backend_language": "Golang",
+						"backend_features": "增强功能供JavaScript调用，支持网络请求、文件读写和命令执行",
+						"dependency_on": "WebView2 (不依赖Node.js或Electron)",
+						"plugin_system_runtime": "浏览器中运行 (而非Node.js)",
+						"scheduled_task_cron_expression": "6位cron表达式 (例如：* * * * * *)",
+						"rolling_release_mechanism": "仅编译分发前端文件，存放在data/rolling-release目录，程序启动后读取该目录"
+					}
+				},
+				"common_problems_and_solutions": [
+					{
+						"problem": "自启动不生效？",
+						"solution": "请检查程序路径中是否包含中文或空格。"
+					},
+					{
+						"problem": "TUN模式无权限？",
+						"solution": "在Windows中，前往设置-通用，勾选以管理员身份运行并重启程序；在Linux和macOS中，前往设置-内核，点击授权图标进行授权。"
+					},
+					{
+						"problem": "TUN模式无法上网？",
+						"solution": "尝试更换TUN堆栈模式，并检查Windows防火墙设置。"
+					},
+					{
+						"problem": "TUN模式出现SSL错误？",
+						"solution": "请配置系统DNS为公网IP（如8.8.8.8）。"
+					},
+					{
+						"problem": "首页只显示4个配置项？",
+						"solution": "这是程序设计所致，您可以在配置页调整顺序，前四项将显示在首页。"
+					},
+					{
+						"problem": "订阅无流量信息？",
+						"solution": "请修改订阅链接，添加&flag=clash.meta，或将订阅UA修改为clash.meta；若使用GUI.for.SingBox，还需安装节点转换插件。"
+					},
+					{
+						"problem": "出现403 API rate limit exceeded错误？",
+						"solution": "请前往设置-通用，填写【向REST API进行身份验证】。"
+					},
+					{
+						"problem": "更新订阅出现Not a valid subscription data？",
+						"solution": "若使用GUI.for.Clash，修改订阅链接，添加&flag=clash.meta；若使用GUI.for.SingBox，修改订阅链接，添加&flag=clash.meta，同时安装【节点转换】插件，或更换为原生支持sing-box的链接。"
+					},
+					{
+						"problem": "滚动发行提示无法跨大版本升级？",
+						"solution": "大版本发布后，需要到设置-关于里更新，滚动发行插件只工作在最新大版本中。"
+					},
+					{
+						"problem": "如何更换托盘图标？",
+						"solution": "设置 - 打开应用程序文件夹，修改data/.cache/icons目录下的图标文件。"
+					}
+				],
+				"reference_documents": [
+					{
+						"title": "插件系统指南",
+						"url": "https://gui-for-cores.github.io/zh/guide/04-plugins"
+					},
+					{
+						"title": "计划任务系统指南",
+						"url": "https://gui-for-cores.github.io/zh/guide/05-tasks"
+					},
+					{
+						"title": "混入与脚本指南",
+						"url": "https://gui-for-cores.github.io/zh/guide/06-mixin-script"
+					},
+					{
+						"title": "使用技巧指南",
+						"url": "https://gui-for-cores.github.io/zh/guide/08-skills"
+					},
+					{
+						"title": "添加节点和规则集指南",
+						"url": "https://gui-for-cores.github.io/zh/guide/community/01-add-proxies-and-rulesets"
+					},
+					{
+						"title": "在Gnome桌面环境中免密码运行TUN模式指南",
+						"url": "https://gui-for-cores.github.io/zh/guide/community/02-run-tun-mode-without-password"
+					}
+				],
+				"community_resources": {
+					"version_notification_channel": {
+						"name": "Telegram",
+						"url": "https://t.me/GUI_for_Cores_Channel"
+					},
+					"交流群组": {
+						"name": "Telegram",
+						"url": "https://t.me/GUI_for_Cores"
 					}
 				}
 			}

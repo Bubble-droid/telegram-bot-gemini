@@ -24,7 +24,7 @@ export async function getUserContextHistory(contextKvNamespace, groupId, userId)
  * @param {number} maxHistoryLength  最大历史记录条数
  * @returns {Promise<void>}
  */
-export async function updateUserContextHistory(contextKvNamespace, imageDataKvNamespace, groupId, userId, messageContent, maxHistoryLength = 10) { //  !!!  恢复为 messageContent 参数  !!!
+export async function updateUserContextHistory(contextKvNamespace, imageDataKvNamespace, groupId, userId, messageContent, maxHistoryLength = 20) { //  !!!  恢复为 messageContent 参数  !!!
 	const key = `context:${groupId}:${userId}`;
 	const previousHistory = await getUserContextHistory(contextKvNamespace, groupId, userId);
 	let history = [...previousHistory];
@@ -124,6 +124,7 @@ async function cleanupOrphanedImageData(imageDataKvNamespace, groupId, userId, c
 export async function clearUserContextHistory(contextKvNamespace, groupId, userId) {
 	const key = `context:${groupId}:${userId}`;
 	await putJsonToKv(contextKvNamespace, key, []); // 存储空数组，清空历史记录
+	console.log(`用户 ${userId} 在群组 ${groupId} 的上下文已清理...`);
 }
 
 /**

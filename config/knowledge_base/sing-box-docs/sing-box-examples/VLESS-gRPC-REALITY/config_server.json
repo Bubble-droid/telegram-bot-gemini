@@ -1,0 +1,38 @@
+{
+    "inbounds": [
+        {
+            "type": "vless",
+            "listen": "::",
+            "listen_port": 443,
+            "users": [
+                {
+                    "uuid": ""
+                }
+            ],
+            "tls": {
+                "enabled": true,
+                "server_name": "",
+                "reality": {
+                    "enabled": true,
+                    "handshake": {
+                        "server": "",
+                        "server_port": 443
+                    },
+                    "private_key": "",
+                    "short_id": [
+                        ""
+                    ]
+                }
+            },
+            "transport": {
+                "type": "grpc",
+                "service_name": "" // gRPC 服务名称
+            }
+        }
+    ],
+    "outbounds": [
+        {
+            "type": "direct"
+        }
+    ]
+}

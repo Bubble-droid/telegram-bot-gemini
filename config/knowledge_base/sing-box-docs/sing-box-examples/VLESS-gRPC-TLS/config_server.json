@@ -1,0 +1,23 @@
+{
+    "inbounds": [
+        {
+            "type": "vless",
+            "listen": "127.0.0.1",
+            "listen_port": 8001,
+            "users": [
+                {
+                    "uuid": ""
+                }
+            ],
+            "transport": {
+                "type": "grpc",
+                "service_name": "" // gRPC 服务名称
+            }
+        }
+    ],
+    "outbounds": [
+        {
+            "type": "direct"
+        }
+    ]
+}

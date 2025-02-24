@@ -1,0 +1,36 @@
+{
+    "inbounds": [
+        {
+            "type": "mixed",
+            "listen": "::",
+            "listen_port": 10000
+        }
+    ],
+    "outbounds": [
+        {
+            "type": "shadowsocks",
+            "detour": "shadowtls-out",
+            "method": "2022-blake3-aes-128-gcm",
+            "password": "",
+            "multiplex": {
+                "enabled": true
+            }
+        },
+        {
+            "type": "shadowtls",
+            "tag": "shadowtls-out",
+            "server": "",
+            "server_port": 443,
+            "version": 3,
+            "password": "",
+            "tls": {
+                "enabled": true,
+                "server_name": "",
+                "utls": {
+                    "enabled": true,
+                    "fingerprint": "chrome"
+                }
+            }
+        }
+    ]
+}

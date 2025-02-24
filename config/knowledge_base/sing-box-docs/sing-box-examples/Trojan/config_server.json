@@ -1,0 +1,27 @@
+{
+    "inbounds": [
+        {
+            "type": "trojan",
+            "listen": "::",
+            "listen_port": 443,
+            "users": [
+                {
+                    "password": ""
+                }
+            ],
+            "tls": {
+                "enabled": true,
+                "certificate_path": "/root/fullchain.cer",
+                "key_path": "/root/private.key"
+            },
+            "multiplex": {
+                "enabled": true
+            }
+        }
+    ],
+    "outbounds": [
+        {
+            "type": "direct"
+        }
+    ]
+}

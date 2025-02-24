@@ -1,0 +1,27 @@
+{
+    "inbounds": [
+        {
+            "type": "mixed",
+            "listen": "::",
+            "listen_port": 10000
+        }
+    ],
+    "outbounds": [
+        {
+            "type": "vless",
+            "server": "",
+            "server_port": 443,
+            "uuid": "",
+            "flow": "xtls-rprx-vision",
+            "tls": {
+                "enabled": true,
+                "server_name": "",
+                "utls": {
+                    "enabled": true,
+                    "fingerprint": "chrome"
+                }
+             },
+            "packet_encoding": "xudp"
+        }
+    ]
+}

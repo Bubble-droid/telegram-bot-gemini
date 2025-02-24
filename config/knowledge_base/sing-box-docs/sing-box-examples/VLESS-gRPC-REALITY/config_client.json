@@ -1,0 +1,35 @@
+{
+    "inbounds": [
+        {
+            "type": "mixed",
+            "listen": "::",
+            "listen_port": 10000
+        }
+    ],
+    "outbounds": [
+        {
+            "type": "vless",
+            "server": "",
+            "server_port": 443,
+            "uuid": "",
+            "tls": {
+                "enabled": true,
+                "server_name": "",
+                "utls": {
+                    "enabled": true,
+                    "fingerprint": "chrome"
+                },
+                "reality": {
+                    "enabled": true,
+                    "public_key": "",
+                    "short_id": ""
+                }
+            },
+            "packet_encoding": "xudp",
+            "transport": {
+                "type": "grpc",
+                "service_name": ""
+            }
+        }
+    ]
+}

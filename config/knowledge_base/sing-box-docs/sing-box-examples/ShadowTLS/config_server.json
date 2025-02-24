@@ -1,0 +1,36 @@
+{
+    "inbounds": [
+        {
+            "type": "shadowtls",
+            "listen": "::",
+            "listen_port": 443,
+            "detour": "shadowsocks-in",
+            "version": 3,
+            "users": [
+                {
+                    "password": ""
+                }
+            ],
+            "handshake": {
+                "server": "", // 要求网站支持 TLS 1.3
+                "server_port": 443
+            },
+            "strict_mode": true
+        },
+        {
+            "type": "shadowsocks",
+            "tag": "shadowsocks-in",
+            "listen": "127.0.0.1",
+            "method": "2022-blake3-aes-128-gcm",
+            "password": "", // 执行 sing-box generate rand 16 --base64 生成
+            "multiplex": {
+                "enabled": true
+            }
+        }
+    ],
+    "outbounds": [
+        {
+            "type": "direct"
+        }
+    ]
+}

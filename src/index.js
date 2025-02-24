@@ -19,10 +19,10 @@ export default {
 			//  !!!  仅当配置了 secretToken 时才进行验证 !!!
 			const requestSecretToken = request.headers.get('X-Telegram-Bot-Api-Secret-Token');
 			if (requestSecretToken !== secretToken) {
-				console.warn('Webhook 验证失败：Secret Token 不正确或缺失，忽略请求'); //  警告日志 -  更明确指出忽略请求
-				return new Response('Unauthorized'); //  !!!  直接返回 200 OK 并忽略请求 !!!
+				console.warn('Webhook 验证失败：Secret Token 不正确或缺失，忽略请求'); //  警告日志
+				return new Response('Unauthorized'); //  忽略请求
 			} else {
-				console.log('Webhook 验证成功：Secret Token 正确，继续处理请求'); //  成功日志 -  更明确
+				console.log('Webhook 验证成功：Secret Token 正确，继续处理请求'); //  成功日志
 			}
 		} else {
 			console.warn('TELEGRAM_WEBHOOK_SECRET_TOKEN 未配置，跳过 Webhook 验证 (生产环境强烈建议配置)'); //  警告日志

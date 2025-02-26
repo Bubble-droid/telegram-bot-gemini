@@ -1,6 +1,6 @@
 // src/summary/summary-config.js
 
-import { getJsonFromKv, putJsonToKv } from '../utils';
+import { getJsonFromKv, putJsonToKv } from '../utils/utils';
 
 /**
  * 获取总结白名单群组列表
@@ -10,7 +10,7 @@ import { getJsonFromKv, putJsonToKv } from '../utils';
 export async function getSummaryGroupWhitelist(env) {
 	const summaryConfigKv = env.SUMMARY_CONFIG;
 	const summaryGroupWhitelistKey = env.SUMMARY_GROUP_WHITELIST_KV_KEY;
-	return await getJsonFromKv(summaryConfigKv, summaryGroupWhitelistKey) || [];
+	return (await getJsonFromKv(summaryConfigKv, summaryGroupWhitelistKey)) || [];
 }
 
 /**
@@ -59,8 +59,8 @@ export async function removeSummaryGroupFromWhitelist(env, groupId) {
  * @returns {Promise<boolean>}
  */
 export async function isGroupInSummaryWhitelist(env, groupId) {
-	const summaryConfigKv = env.SUMMARY_CONFIG;
-	const summaryGroupWhitelistKey = env.SUMMARY_GROUP_WHITELIST_KV_KEY;
+	// const summaryConfigKv = env.SUMMARY_CONFIG;
+	// const summaryGroupWhitelistKey = env.SUMMARY_GROUP_WHITELIST_KV_KEY;
 	const whitelist = await getSummaryGroupWhitelist(env);
 	return whitelist.includes(groupId);
 }
@@ -73,5 +73,5 @@ export async function isGroupInSummaryWhitelist(env, groupId) {
 export async function getSummarySystemPrompt(env) {
 	const systemInitConfigKv = env.SYSTEM_INIT_CONFIG;
 	const systemPromptKey = env.SUMMARY_SYSTEM_PROMPT_KV_KEY;
-	return await getJsonFromKv(systemInitConfigKv, systemPromptKey) || "You are a helpful assistant. Summarize the following chat history.";
+	return (await getJsonFromKv(systemInitConfigKv, systemPromptKey)) || 'You are a helpful assistant. Summarize the following chat history.';
 }

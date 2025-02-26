@@ -1,6 +1,6 @@
 // src/handlers/image-handler.js
 
-import { base64Encode } from '../utils';
+import { base64Encode } from '../utils/utils';
 
 /**
  * 处理图片消息并获取消息内容 (用于普通消息和回复提问) -  合并函数，添加 isReply 参数
@@ -18,11 +18,12 @@ export async function handleImageMessageForContext(message, env, isReply = false
 	if (photoArray.length >= 3) {
 		largestPhoto = photoArray[2]; //  优先选择索引为 2 的图片 (第三个尺寸)
 		console.log(`图片尺寸数组长度 >= 3，选择索引为 2 的图片`);
-	} else if (photoArray.length > 0) { //  !!!  添加判断，防止 photoArray 为空时报错
+	} else if (photoArray.length > 0) {
+		//  !!!  添加判断，防止 photoArray 为空时报错
 		largestPhoto = photoArray[photoArray.length - 1]; //  否则选择最后一个可用的图片尺寸
 		console.log(`图片尺寸数组长度 < 3，选择最后一个可用的图片`);
 	} else {
-		console.warn("图片尺寸数组为空，无法获取图片"); //  添加警告日志
+		console.warn('图片尺寸数组为空，无法获取图片'); //  添加警告日志
 		return { role: 'user', content: [{ type: 'text', text: message.caption || '(图片消息) - 无可用图片尺寸' }] };
 	}
 	//  !!!  largestPhoto 选择逻辑结束  !!!
@@ -55,9 +56,8 @@ export async function handleImageMessageForContext(message, env, isReply = false
 
 		//  !!!  获取 botName 并移除 caption 中的 @botName  !!!
 		const botName = env.TELEGRAM_BOT_NAME;
-		let processedCaption = message.caption || "";
+		let processedCaption = message.caption || '';
 		processedCaption = processedCaption.replace(new RegExp(`@${botName}`, 'gi'), '').trim(); //  !!!  使用 RegExp 忽略大小写  !!!
-
 
 		if (!isReply) {
 			const imageKvKey = `image_base64_${crypto.randomUUID()}`;
@@ -74,7 +74,7 @@ export async function handleImageMessageForContext(message, env, isReply = false
 				],
 			};
 		} else {
-			console.log("回复提问场景，跳过图片数据 KV 存储");
+			console.log('回复提问场景，跳过图片数据 KV 存储');
 			return {
 				role: 'user',
 				content: [
@@ -86,8 +86,6 @@ export async function handleImageMessageForContext(message, env, isReply = false
 				],
 			};
 		}
-
-
 	} catch (error) {
 		console.error(`处理图片消息失败 (普通消息/回复提问, isReply: ${isReply}):`, error);
 		return { role: 'user', content: [{ type: 'text', text: message.caption || `(图片消息) - 处理错误: ${error.message}` }] };

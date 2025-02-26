@@ -5,7 +5,7 @@
  * @param {string} text  要转义的文本
  * @returns {string}  转义后的 HTML 文本
  */
-function escapeHtml(text) {
+export function escapeHtml(text) {
 	if (!text) return '';
 	return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
@@ -35,9 +35,6 @@ export function formatGeminiReply(text) {
 
 		// 粗体格式化 (**bold**  =>  <b>bold</b>)
 		formattedText = formattedText.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
-
-		// 斜体格式化 (*italic*  =>  <i>italic</i>)
-		formattedText = formattedText.replace(/\*(.*?)\*/g, '<i>$1</i>');
 
 		// 下划线格式化 (__underline__  =>  <u>underline</u>)
 		formattedText = formattedText.replace(/__(.*?)__/g, '<u>$1</u>');

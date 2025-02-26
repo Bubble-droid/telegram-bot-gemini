@@ -1,4 +1,4 @@
-// src/gemini.js
+// src/api/gemini-api.js
 
 import OpenAI from 'openai';
 
@@ -10,7 +10,7 @@ let openaiClient;
  * @param {string} baseUrl Gemini API Base URL
  * @param {string} modelName Gemini 模型名称
  */
-export function initGeminiAPI(apiKey, baseUrl, modelName) {
+export function initGeminiAPI(apiKey, baseUrl) {
 	openaiClient = new OpenAI({
 		apiKey: apiKey,
 		baseURL: baseUrl,

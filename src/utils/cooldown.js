@@ -1,6 +1,6 @@
 // src/utils/cooldown.js
 
-import { getJsonFromKv, putJsonToKv } from '../utils';
+import { getJsonFromKv, putJsonToKv } from '../utils/utils';
 
 /**
  * 检查群组是否处于冷却中 (通用冷却 -  用于普通提问)

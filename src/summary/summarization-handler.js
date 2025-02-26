@@ -1,6 +1,6 @@
 // src/summary/summarization-handler.js
 
-import { getJsonFromKv, putJsonToKv } from '../utils';
+import { getJsonFromKv, putJsonToKv } from '../utils/utils';
 import { isGroupInSummaryWhitelist } from './summary-config';
 
 /**
@@ -16,7 +16,7 @@ export async function recordGroupMessage(env, message) {
 			return; // 私聊消息不记录
 		}
 
-		if (!await isGroupInSummaryWhitelist(env, groupId)) {
+		if (!(await isGroupInSummaryWhitelist(env, groupId))) {
 			return; // 非总结白名单群组不记录
 		}
 
@@ -27,7 +27,7 @@ export async function recordGroupMessage(env, message) {
 
 		const historyDataKv = env.HISTORY_DATA;
 		const historyKey = `history:${groupId}`;
-		const currentHistory = await getJsonFromKv(historyDataKv, historyKey) || [];
+		const currentHistory = (await getJsonFromKv(historyDataKv, historyKey)) || [];
 
 		const userName = `${message.from.first_name || ''} ${message.from.last_name || ''}`.trim();
 		const utcDate = new Date(message.date * 1000); // 先创建 UTC 时间的 Date 对象
@@ -63,7 +63,6 @@ export async function recordGroupMessage(env, message) {
 			messageObject.forward_from.message = forwardedText.substring(0, 50) + (forwardedText.length > 50 ? '...' : ''); // 记录转发消息的前 50 个字符
 		}
 
-
 		currentHistory.push(messageObject);
 		await putJsonToKv(historyDataKv, historyKey, currentHistory);
 
@@ -77,10 +76,8 @@ export async function recordGroupMessage(env, message) {
 			logMessage += `，转发自: ${forwardSource} - "${forwardContent}"`;
 		}
 		console.log(logMessage);
-
-
 	} catch (error) {
-		console.error("记录群组消息失败:", error);
+		console.error('记录群组消息失败:', error);
 	}
 }
 
@@ -126,7 +123,13 @@ export async function clearGroupHistory(env, groupId) {
 
 //  processGeminiSummaryResponse 函数 (目前只需要返回 Gemini 文本内容，无需特殊处理)
 export async function processGeminiSummaryResponse(geminiResponse) {
-	if (geminiResponse && geminiResponse.choices && geminiResponse.choices[0] && geminiResponse.choices[0].message && geminiResponse.choices[0].message.content) {
+	if (
+		geminiResponse &&
+		geminiResponse.choices &&
+		geminiResponse.choices[0] &&
+		geminiResponse.choices[0].message &&
+		geminiResponse.choices[0].message.content
+	) {
 		return geminiResponse.choices[0].message.content.trim();
 	} else {
 		return null;

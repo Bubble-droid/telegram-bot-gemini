@@ -1,7 +1,7 @@
-// src/utils.js
+// src/utils/utils.js
 
-import { sendTelegramMessage } from './index';
-import { recordBotReplyMessage } from './handlers/command-handler';
+import { escapeHtml } from './formatter';
+import { recordGroupMessage } from '../summary/summarization-handler';
 
 /**
  * 从 KV 命名空间获取 JSON 数据
@@ -182,11 +182,19 @@ export async function sendErrorNotification(env, error, context, sendTelegramMes
 
 	if (maintainerUserIds.length > 0) {
 		const errorMessage =
-			`<b>[错误告警]</b>\n\n` +
-			`发生时间: <code>${timestamp}</code>\n\n` +
-			`错误上下文: <code>${context}</code>\n\n` +
-			`错误信息: <code>${error.message}</code>\n\n` +
-			`堆栈追踪: <pre><code class="language-javascript">${error.stack ? escapeHtml(error.stack) : 'N/A'}</code></pre>`; //  包含堆栈追踪信息
+			'<b>[错误告警]</b>\n\n' +
+			'发生时间: <code>' +
+			timestamp +
+			'</code>\n\n' +
+			'错误上下文: <code>' +
+			context +
+			'</code>\n\n' +
+			'错误信息: <code>' +
+			error.message +
+			'</code>\n\n' +
+			'堆栈追踪: <pre><code class="language-javascript">' +
+			(error.stack ? escapeHtml(error.stack) : '<code>N/A</code>') +
+			'</code></pre>'; // 包含堆栈追踪信息
 
 		for (const maintainerId of maintainerUserIds) {
 			try {
@@ -201,6 +209,29 @@ export async function sendErrorNotification(env, error, context, sendTelegramMes
 		console.warn('未配置维护人员用户 ID，无法发送错误通知:', context, '-', error.message);
 		console.warn('原始错误:', error); //  同时打印原始错误
 	}
+}
+
+/**
+ * 封装记录机器人回复消息的函数 (避免代码重复)
+ * @param {KVNamespace} env  Cloudflare Worker environment
+ * @param {string} botName 机器人名称
+ * @param {string} replyText 机器人回复文本
+ * @param {number} groupId 群组 ID
+ * @returns {Promise<void>}
+ */
+export async function recordBotReplyMessage(env, botName, replyText, groupId) {
+	//  !!!  修改为 env 参数 !!!
+	const botReplyMessage = {
+		chat: { id: groupId, type: 'group' },
+		from: {
+			id: 0,
+			first_name: botName,
+			is_bot: true,
+		},
+		text: replyText,
+		date: Math.floor(Date.now() / 1000),
+	};
+	await recordGroupMessage(env, botReplyMessage); //  !!!  传递 env !!!
 }
 
 /**
@@ -271,7 +302,7 @@ export async function handleCooldownReplyAndCleanup(
 				//  时间未到，或删除指令不存在，则等待一段时间后再次检查
 				//  如果删除指令已被其他请求处理 (例如，由于网络延迟导致重复请求)，则 storedDeletionSignal 可能为 null，此时也应该跳出循环，避免无限循环
 				if (!storedDeletionSignal) {
-					console.log(`KV 中删除指令已不存在，跳出轮询`);
+					console.log('KV 中删除指令已不存在，跳出轮询');
 					break; //  跳出循环
 				}
 				// console.log(`删除就绪时间未到，等待 ${delayCheckInterval} 毫秒后再次检查... (当前时间: ${now}, 删除就绪时间: ${storedDeletionSignal.deletionReadyTimestamp})`); //  减少日志输出

@@ -1,31 +1,16 @@
 // src/index.js
 
-import {
-	getJsonFromKv,
-	putJsonToKv,
-	getUserWhitelist,
-	sendErrorNotification,
-	handleCooldownReplyAndCleanup,
-	recordBotReplyMessage,
-} from './utils/utils';
-import { initGeminiAPI, getGeminiChatCompletion } from './api/gemini-api';
-import { handleBotCommand, botCommands } from './handlers/command-handler';
+import { getJsonFromKv, getUserWhitelist, sendErrorNotification, isUserBlacklisted } from './utils/utils';
+import { getGeminiChatCompletion } from './api/gemini-api';
+import { handleBotCommand, botCommands, handleCommandReplyAndCleanup } from './handlers/command-handler';
 import { handleImageMessageForContext } from './handlers/image-handler';
 import { getUserContextHistory, updateUserContextHistory } from './storage/context-storage';
 import { isGroupInCooldown, recordGroupRequestTimestamp, parseDurationToMs } from './utils/cooldown';
-import { formatGeminiReply } from './utils/formatter';
 import { recordGroupMessage } from './summary/summarization-handler';
 import { startDailyRecord, stopDailyRecordAndSummarize } from './summary/daily-summary-task';
-import { handleBotMentionQuestion } from './handlers/convo-handler';
-import { handleReplyToMessageQuestion } from './handlers/message-handler';
-import {
-	setBotCommands,
-	setChatMenuButton,
-	sendTelegramMessage,
-	editTelegramMessage,
-	deleteTelegramMessage,
-	forwardTelegramMessage,
-} from './api/telegram-api';
+import { handleReplyToMessageQuestion, handleBotMentionQuestion } from './handlers/message-handler';
+import { setBotCommands, setChatMenuButton, sendTelegramMessage, deleteTelegramMessage, forwardTelegramMessage } from './api/telegram-api';
+import { handleJsonFileMessage } from './handlers/document-handler';
 
 export default {
 	async fetch(request, env) {
@@ -79,16 +64,26 @@ export default {
 
 				const message = update.message;
 				const chatType = message.chat.type; //  !!!  获取 chat type
+				const userId = message.from.id;
 				const groupId = message.chat.id;
 
+				const botName = env.TELEGRAM_BOT_NAME; // 获取机器人名称
+
+				const botConfigKv = env.BOT_CONFIG;
+				const userBlacklistKey = env.USER_BLACKLIST_KV_KEY;
+				const isBlacklisted = await isUserBlacklisted(botConfigKv, userBlacklistKey, userId); //  !!!  检查用户是否在黑名单 !!!
+
 				if (chatType === 'private') {
+					//  !!!  黑名单检测  !!!
+					if (isBlacklisted) {
+						console.log(`用户 ${userId} 在黑名单中，拒绝处理`);
+						const replyText = '😅抱歉！你无权使用此机器人！'; //  黑名单回复消息
+						await sendTelegramMessage(env.BOT_TOKEN, groupId, replyText, message.message_id, 'HTML'); // 发送黑名单回复
+						return new Response('OK'); //  直接返回，不再进行任何处理
+					}
+
 					//  !!!  私聊消息处理 (保持不变)  !!!
 					console.log('收到私聊消息');
-
-					//	设置 Bot 命令菜单
-					await setBotCommands(env.BOT_TOKEN, botCommands, groupId);
-					//	设置 Bot 对话菜单按钮
-					await setChatMenuButton(env.BOT_TOKEN, groupId);
 
 					//  !!!  命令检测判断 (私聊消息中也进行命令检测，但仅用于忽略，不实际处理命令) !!!
 					const botCommandPrefix = '/';
@@ -99,6 +94,11 @@ export default {
 					if (message.entities) {
 						for (const entity of message.entities) {
 							if (entity.type === 'bot_command') {
+								//	设置 Bot 命令菜单
+								await setBotCommands(env.BOT_TOKEN, botCommands, groupId);
+								//	设置 Bot 对话菜单按钮
+								await setChatMenuButton(env.BOT_TOKEN, groupId);
+
 								const commandText = messageText.substring(entity.offset, entity.offset + entity.length);
 								if (commandText.startsWith(botCommandPrefix)) {
 									isPrivateChatCommand = true;
@@ -115,8 +115,8 @@ export default {
 						if (privateChatCommand === 'start') {
 							//  !!!  处理私聊 /start 命令  !!!
 							const replyText =
-								'👋 你好！请注意私聊通道只用于反馈和建议，<b>无法进行提问！</b>\n\n' +
-								'请直接提交你的反馈内容，我会将你的消息转发给维护人员。';
+								'👋 你好！请注意私聊通道只用于反馈和建议(<b>仅限和 Bot 有关的问题</b>)，<b>无法进行提问！</b>\n\n' +
+								'请直接提交你的反馈内容，我会将你的消息转发给 Bot 的维护者。';
 							await sendTelegramMessage(env.BOT_TOKEN, groupId, replyText, message.message_id, 'HTML'); //  发送回复
 							console.log('已回复私聊 /start 命令');
 							return new Response('OK'); //  返回，不再进行后续处理
@@ -157,14 +157,14 @@ export default {
 					await recordGroupMessage(env, message); //  !!!  提前到此处调用 recordGroupMessage !!!
 				}
 
-				//	设置 Bot 命令菜单
-				await setBotCommands(env.BOT_TOKEN, botCommands, groupId);
-
 				//  !!!  命令检测 (优先级最高，在 @ 提及检测之前) !!!
 				let isBotCommand = false;
 				if (message.entities) {
 					for (const entity of message.entities) {
 						if (entity.type === 'bot_command') {
+							//	设置 Bot 命令菜单
+							await setBotCommands(env.BOT_TOKEN, botCommands, groupId);
+
 							isBotCommand = true;
 							break; //  找到 bot_command 即可跳出循环
 						}
@@ -184,8 +184,6 @@ export default {
 					); //  !!!  统一由 handleBotCommand 处理所有命令 !!!
 				}
 
-				const botName = env.TELEGRAM_BOT_NAME; // 获取机器人名称
-
 				//  !!!  @bot 提问检测 (在命令检测之后)  !!!
 				let isBotMention = false;
 				const textToCheck = message.text || message.caption;
@@ -202,259 +200,118 @@ export default {
 					}
 				}
 
+				//	群组白名单检测
+				const groupWhitelistKey = env.GROUP_WHITELIST_KV_KEY;
+				const groupWhitelist = (await getJsonFromKv(botConfigKv, groupWhitelistKey)) || [];
+				if (!groupWhitelist.includes(groupId)) {
+					console.log(`群组 ${groupId} 不在白名单中，忽略消息处理`);
+					return new Response('OK');
+				}
+				console.log(`群组 ${groupId} 在白名单中，继续处理消息`);
+
 				if (isBotMention) {
-					//	初始化 Gemini API 客户端
-					initGeminiAPI(env.GEMINI_API_KEY, env.OPENAI_API_BASE_URL);
+					//  !!!  黑名单检测  !!!
+					if (isBlacklisted) {
+						console.log(`用户 ${userId} 在黑名单中，拒绝处理`);
+						const replyText = '😅抱歉！你无权使用此机器人！'; //  黑名单回复消息
+						await handleCommandReplyAndCleanup(
+							env.BOT_TOKEN,
+							groupId,
+							replyText,
+							message.message_id,
+							sendTelegramMessage,
+							deleteTelegramMessage,
+							env,
+							message.message_id,
+							botName,
+						); //  发送黑名单回复并清理消息
+						return new Response('OK'); //  直接返回，不再进行任何处理
+					}
 
 					console.log('检测到 @bot 提及 (可能为提问)');
-					if (!message.text && !message.photo) {
+					if (!message.document && !message.text && !message.photo) {
 						console.log('消息既不是文本也不是图片，忽略');
-						const replyText = '😅 抱歉！暂不支持处理文件、音频和视频内容，请直接发送图片或者文本进行提问。';
+						const replyText = '😅 抱歉！暂不支持处理非文本文件、音频和视频内容。';
 						await sendTelegramMessage(env.BOT_TOKEN, groupId, replyText, message.message_id, 'HTML'); //  回复消息
 						return new Response('OK');
+					}
+
+					const userWhitelistKey = env.USER_WHITELIST_KV_KEY;
+					const userWhitelist = (await getUserWhitelist(botConfigKv, userWhitelistKey)) || [];
+					const cooldownDuration = env.COOLDOWN_DURATION;
+					const isInCooldown = await isGroupInCooldown(botConfigKv, cooldownDuration, groupId, userId, userWhitelist);
+					if (isInCooldown) {
+						console.log(`群组 ${groupId} 处于冷却中，忽略 @bot 提问, 发送冷却提示`); //  !!!  添加日志，表明发送冷却提示 !!!
+						//  !!!  新增: 冷却中回复消息 !!!
+						const lastRequestTimestampKey = `cooldown:${groupId}`; //  获取 lastRequestTimestampKey
+						const lastRequestTimestamp = (await getJsonFromKv(botConfigKv, lastRequestTimestampKey)) || 0; // 获取上次请求时间戳
+						const cooldownMs = parseDurationToMs(cooldownDuration); //  解析冷却时间为毫秒 (假设 parseDurationToMs 函数已定义)
+						const remainingSeconds = Math.ceil((cooldownMs - (Date.now() - lastRequestTimestamp)) / 1000); // 计算剩余秒数
+						const replyText = `⏱️ 系统正在冷却中，请等待 ${remainingSeconds} 秒后重试！`; //  构建冷却提示消息
+
+						await sendTelegramMessage(env.BOT_TOKEN, groupId, replyText, message.message_id, 'HTML');
+						return new Response('OK');
+					}
+					console.log(`群组 ${groupId} 未冷却或用户在白名单中，继续处理 @bot 提问`);
+
+					if (message.document) {
+						const fileType = message.document.mime_type;
+						if (fileType === 'application/json') {
+							console.log(`检测到提问携带 JSON 文件`);
+							await handleJsonFileMessage(env, message, sendTelegramMessage);
+							return new Response('OK');
+						} else {
+							console.log(`检测到提问携带文件，但不是 JSON 类型`);
+							return new Response('OK');
+						}
 					}
 
 					if (message.reply_to_message) {
 						//  !!! 回复消息的判断 !!!
 						//  !!! 回复提问处理 (不带上下文) !!!
-						console.log('检测到回复提问 (不带上下文) - 流式响应处理');
+						console.log('检测到回复提问 (不带上下文)');
 
-						return handleReplyToMessageQuestion(
+						await handleReplyToMessageQuestion(
 							message,
 							env,
 							botName,
-							deleteTelegramMessage,
 							sendTelegramMessage,
-							editTelegramMessage,
 							recordGroupRequestTimestamp,
 							isGroupInCooldown,
 							getUserWhitelist,
 							getJsonFromKv,
 							getGeminiChatCompletion,
-							formatGeminiReply,
 						);
 					} else {
 						// @bot 提问处理 (流式响应，带上下文)
-						console.log(`检测到 @bot 提问 (图片消息: ${!!message.photo}) -  流式响应处理 (带上下文)`);
-
-						const groupId = message.chat.id;
-						const groupWhitelistKey = env.GROUP_WHITELIST_KV_KEY;
-						const botConfigKv = env.BOT_CONFIG;
-						const groupWhitelist = (await getJsonFromKv(botConfigKv, groupWhitelistKey)) || [];
-						if (!groupWhitelist.includes(groupId)) {
-							console.log(`群组 ${groupId} 不在白名单中，忽略 @bot 提问`);
-							return new Response('OK');
-						}
-						console.log(`群组 ${groupId} 在白名单中，继续处理 @bot 提问`);
-
-						const userId = message.from.id;
-						const userWhitelistKey = env.USER_WHITELIST_KV_KEY;
-						const userWhitelist = (await getUserWhitelist(botConfigKv, userWhitelistKey)) || [];
-						const cooldownDuration = env.COOLDOWN_DURATION;
-						const isInCooldown = await isGroupInCooldown(botConfigKv, cooldownDuration, groupId, userId, userWhitelist);
-						if (isInCooldown) {
-							console.log(`群组 ${groupId} 处于冷却中，忽略 @bot 提问, 发送冷却提示`); //  !!!  添加日志，表明发送冷却提示 !!!
-							//  !!!  新增: 冷却中回复消息 !!!
-							const lastRequestTimestampKey = `cooldown:${groupId}`; //  获取 lastRequestTimestampKey
-							const lastRequestTimestamp = (await getJsonFromKv(botConfigKv, lastRequestTimestampKey)) || 0; // 获取上次请求时间戳
-							const cooldownMs = parseDurationToMs(cooldownDuration); //  解析冷却时间为毫秒 (假设 parseDurationToMs 函数已定义)
-							const remainingSeconds = Math.ceil((cooldownMs - (Date.now() - lastRequestTimestamp)) / 1000); // 计算剩余秒数
-							const replyText = `⏱️ 系统正在冷却中，请等待 ${remainingSeconds} 秒后重试！`; //  构建冷却提示消息
-
-							await handleCooldownReplyAndCleanup(
-								env.BOT_TOKEN,
-								groupId,
-								replyText,
-								message.message_id,
-								sendTelegramMessage,
-								deleteTelegramMessage,
-								env,
-								message.message_id,
-								botName,
-							); // 发送冷却提示并清理
-							return new Response('OK');
-						}
-						console.log(`群组 ${groupId} 未冷却或用户在白名单中，继续处理 @bot 提问`);
-
-						let messageContent;
-
-						if (message.text) {
-							const textWithoutBotName = message.text.replace(new RegExp(`@${botName}`, 'gi'), '').trim(); //  !!!  使用 RegExp 忽略大小写  !!!
-							messageContent = { role: 'user', content: textWithoutBotName };
-						} else if (message.photo) {
-							messageContent = await handleImageMessageForContext(message, env);
-						}
-
-						if (!messageContent) {
-							console.warn('messageContent 为空，忽略 @bot 提问');
-							return new Response('OK');
-						}
-
-						const contextKv = env.CONTEXT;
-						const modelName = env.DEFAULT_GEMINI_MODEL_NAME;
-						const systemInitConfigKv = env.SYSTEM_INIT_CONFIG;
-						const systemPromptKey = env.SYSTEM_PROMPT_KV_KEY;
-						const knowledgeBaseKey = env.KNOWLEDGE_BASE_KV_KEY;
-						const imageDataKv = env.IMAGE_DATA;
-						const botMessageIdsKv = env.BOT_MESSAGE_IDS; //  !!!  获取 BOT_MESSAGE_IDS KV Namespace  !!!
-						const contextHistory = await getUserContextHistory(contextKv, groupId, userId);
-						// console.log("上下文历史记录 (提问前):", contextHistory);
-
-						const systemPromptData = (await getJsonFromKv(systemInitConfigKv, systemPromptKey)) || {
-							systemPrompt: 'You are a helpful assistant.',
-						}; //  获取系统提示词
-						const knowledgeBaseData = (await getJsonFromKv(systemInitConfigKv, knowledgeBaseKey)) || { knowledgeBase: '' }; //  !!! 获取知识库 !!!
-
-						let systemPromptText = systemPromptData;
-						let knowledgeBaseText = knowledgeBaseData;
-
-						if (typeof systemPromptText === 'object') {
-							//  !!!  添加判断，确保是对象 !!!
-							systemPromptText = JSON.stringify(systemPromptText); //  !!!  将整个 JSON 对象转换为字符串 !!!
-						}
-						if (typeof knowledgeBaseText === 'object') {
-							//  !!!  添加判断，确保是对象 !!!
-							knowledgeBaseText = JSON.stringify(knowledgeBaseText); //  !!!  将整个 JSON 对象转换为字符串 !!!
-						}
-
-						const combinedSystemPrompt = `${systemPromptText}\n\n${knowledgeBaseText}`; //  !!! 合并提示词和知识库 !!!
-						const systemInitMessages = [{ role: 'system', content: combinedSystemPrompt }]; //  !!! 使用合并后的提示词 !!!
-						// console.log("系统初始化消息 (普通 @提问, 分离知识库, 合并后):", systemInitMessages);
-
-						let processedMessages = [];
-						for (const msg of [...contextHistory, messageContent]) {
-							if (msg.content && Array.isArray(msg.content)) {
-								const processedContent = await Promise.all(
-									msg.content.map(async (contentPart) => {
-										if (contentPart.type === 'image_url') {
-											const imageKvKey = contentPart.image_url.url;
-											const base64Image = await imageDataKv.get(imageKvKey);
-											if (base64Image) {
-												return {
-													type: 'image_url',
-													image_url: { url: `data:image/jpeg;base64,${base64Image}` },
-												};
-											} else {
-												console.error(`KV 键名 ${imageKvKey} 对应的 Base64 数据未找到`);
-												return { type: 'text', text: `(图片数据丢失, key: ${imageKvKey})` };
-											}
-										}
-										return contentPart;
-									}),
-								);
-								processedMessages.push({ role: msg.role, content: processedContent });
-							} else {
-								processedMessages.push(msg);
-							}
-						}
-
-						const geminiMessages = [...systemInitMessages, ...processedMessages];
-						// console.log("发送给 Gemini API 的消息 (流式):", JSON.stringify(geminiMessages, null, 2)); //  修改日志
-
-						let geminiStream; //  声明 geminiStream 变量
-						let telegramMessageId = null; //  声明 telegramMessageId 到外部作用域
-						let geminiReplyText = ''; //  !!! 修正：声明 geminiReplyText 到函数作用域 !!!
-						let lastEditedText = ''; //  !!! 修正：声明 lastEditedText 到函数作用域 !!!
-
-						try {
-							geminiStream = await getGeminiChatCompletion(geminiMessages, modelName);
-							// console.log("Gemini API 流式响应:", geminiStream); //  !!!  不要打印 stream 对象，会输出大量信息  !!!
-
-							let accumulatedReplyText = ''; //  用于累积 Gemini API 回复文本
-							telegramMessageId = null; //  用于存储第一条 Telegram 消息的 message_id，后续编辑消息
-
-							//  !!!  逐 chunk 处理 Gemini API 流式响应  !!!
-							for await (const chunk of geminiStream) {
-								const chunkText = chunk.choices[0]?.delta?.content || '';
-								if (chunkText) {
-									accumulatedReplyText += chunkText;
-									const formattedChunkText = formatGeminiReply(chunkText);
-									const currentText = formatGeminiReply(accumulatedReplyText); // 获取当前累积的格式化文本
-									if (currentText !== lastEditedText) {
-										//  !!! 内容差异检测 !!!
-										if (!telegramMessageId) {
-											const firstResponse = await sendTelegramMessage(
-												env.BOT_TOKEN,
-												groupId,
-												formattedChunkText,
-												message.message_id,
-												'HTML',
-											);
-											telegramMessageId = firstResponse?.message_id;
-											lastEditedText = formattedChunkText; // 更新 lastEditedText
-											console.log('发送第一条流式消息，message_id:', telegramMessageId);
-										} else {
-											const editResult = await editTelegramMessage(env.BOT_TOKEN, groupId, telegramMessageId, currentText, 'HTML'); //  使用 currentText 编辑
-											if (editResult.ok) {
-												lastEditedText = currentText; //  !!! 仅在编辑成功时更新 lastEditedText !!!
-												// console.log('编辑 Telegram 消息成功，message_id:', telegramMessageId);
-											} else {
-												console.error('编辑 Telegram 消息失败:', editResult);
-												console.error('编辑 Telegram 消息失败详情:', editResult);
-												if (editResult.error && editResult.error.error_code === 429) {
-													console.warn('遇到 429 错误，达到速率限制，请稍后重试');
-												}
-												const fallbackText =
-													formatGeminiReply(chunkText) || '🤖️ Gemini API 接口流式传输过程中编辑消息失败，尝试发送新消息...';
-												console.log('降级发送新消息, fallbackText:', fallbackText);
-												const sendFallbackResult = await sendTelegramMessage(env.BOT_TOKEN, groupId, fallbackText, null, 'HTML');
-												if (!sendFallbackResult.ok) {
-													console.error('降级发送新消息也失败:', sendFallbackResult);
-												}
-											}
-										}
-									} else {
-										console.log('本次 chunk 内容与上次编辑内容相同，跳过编辑操作'); //  添加日志：跳过编辑
-									}
-									await new Promise((resolve) => setTimeout(resolve, 3000));
-								}
-							}
-							//  !!!  for await 循环 结束 !!!
-
-							await recordBotReplyMessage(env, botName, accumulatedReplyText, groupId); //  调用
-							console.log('已记录 @ 提问的回复消息');
-
-							// console.log("Gemini API 流式响应处理完成，完整回复文本 (原始):", accumulatedReplyText); //  打印完整回复 (原始)
-							// console.log("Gemini API 流式响应处理完成，完整回复文本 (HTML 格式化后):", formatGeminiReply(accumulatedReplyText));
-
-							//  !!!  存储 Bot 消息 ID  !!!
-							if (telegramMessageId) {
-								const botMessageIdKey = `last_bot_message_id:${groupId}:${userId}`;
-								await putJsonToKv(botMessageIdsKv, botMessageIdKey, telegramMessageId); //  !!!  使用 BOT_MESSAGE_IDS KV  !!!
-								console.log(`存储 Bot 消息 ID (message_id: ${telegramMessageId}) 到 KV, key: ${botMessageIdKey}`);
-							}
-
-							//  !!!  恢复为两次调用 updateUserContextHistory，分别记录 userMessage 和 botReply  !!!
-							await updateUserContextHistory(contextKv, imageDataKv, groupId, userId, messageContent); //  记录用户消息
-							const botReplyMessageContent = { role: 'assistant', content: accumulatedReplyText }; //  机器人回复消息内容
-							await updateUserContextHistory(contextKv, env.IMAGE_DATA, groupId, userId, botReplyMessageContent); //  记录机器人回复消息
-							// console.log("上下文历史记录 (提问后):", await getUserContextHistory(contextKv, groupId, userId));
-
-							await recordGroupRequestTimestamp(botConfigKv, groupId);
-						} catch (error) {
-							console.error('调用 Gemini API 失败 (流式传输):', error);
-							geminiReplyText = '🤖️ Gemini API 接口调用失败，请稍后再试 (流式传输)'; //  修改错误提示信息，提示流式传输
-							await sendTelegramMessage(env.BOT_TOKEN, groupId, geminiReplyText, message.message_id, 'HTML'); //  发送错误消息
-						}
-					} //  !!!  @bot 提问处理 (流式响应)  的  else  代码块 结束 !!!
+						console.log(`检测到 @bot 提问 (图片消息: ${!!message.photo}) - (带上下文)`);
+						await handleBotMentionQuestion(
+							message,
+							env,
+							botName,
+							sendTelegramMessage,
+							recordGroupRequestTimestamp,
+							isGroupInCooldown,
+							getUserWhitelist,
+							getJsonFromKv,
+							getUserContextHistory,
+							updateUserContextHistory,
+							getGeminiChatCompletion,
+						);
+					}
 				}
 
 				if (!isBotCommand && !isBotMention) {
 					// !!!  普通群组消息处理 (非 @bot 提及, 也非命令)  !!!
+					//  !!!  黑名单检测  !!!
+					if (isBlacklisted) {
+						console.log(`用户 ${userId} 在黑名单中，拒绝处理`);
+						return new Response('OK'); //  直接返回，不再进行任何处理
+					}
+
 					console.log(`普通群组消息 (非 @bot 提及, 也非命令, 图片消息: ${!!message.photo})`);
 
-					const groupId = message.chat.id;
-					const groupWhitelistKey = env.GROUP_WHITELIST_KV_KEY;
-					const botConfigKv = env.BOT_CONFIG;
-					const groupWhitelist = (await getJsonFromKv(botConfigKv, groupWhitelistKey)) || [];
-					if (!groupWhitelist.includes(groupId)) {
-						console.log(`群组 ${groupId} 不在白名单中，忽略普通消息`);
-						return new Response('OK');
-					}
-					console.log(`群组 ${groupId} 在白名单中，继续处理普通消息并记录上下文`);
-
 					const contextKv = env.CONTEXT;
-					const userId = message.from.id;
 					const botMessageIdsKv = env.BOT_MESSAGE_IDS; //  !!!  获取 BOT_MESSAGE_IDS KV Namespace  !!!
 
 					//  !!!  连续对话检测 !!!
@@ -467,12 +324,11 @@ export default {
 							//  !!!  检测到连续对话 !!!
 							console.log(`检测到用户 ${userId} 在群组 ${groupId} 的连续对话 (回复了 message_id: ${lastBotMessageId})`);
 							//  !!!  触发 @ 提问处理流程 (复用现有逻辑) !!!
-							return handleBotMentionQuestion(
+							await handleBotMentionQuestion(
 								message,
 								env,
 								botName,
 								sendTelegramMessage,
-								editTelegramMessage,
 								recordGroupRequestTimestamp,
 								isGroupInCooldown,
 								getUserWhitelist,
@@ -480,8 +336,7 @@ export default {
 								getUserContextHistory,
 								updateUserContextHistory,
 								getGeminiChatCompletion,
-								formatGeminiReply,
-							); //  !!!  直接调用 @ 提问处理函数 !!!
+							);
 						} else {
 							console.log(
 								`用户 ${userId} 回复了 Bot 消息，但不是连续对话 (lastBotMessageId: ${lastBotMessageId}, reply_message_id: ${message.reply_to_message.message_id})`,
@@ -535,7 +390,7 @@ export default {
 			return new Response('Method Not Allowed', { status: 405 });
 		}
 	},
-	//  !!!  正确的 scheduled 事件监听器  !!!
+	// scheduled 事件监听器
 	async scheduled(event, env) {
 		console.log('Cron trigger event:', event); // 打印 event 对象，方便调试
 

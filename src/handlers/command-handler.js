@@ -7,22 +7,25 @@ import {
 	putJsonToKv,
 	getJsonFromKv,
 	recordBotReplyMessage,
-} from '../utils/utils'; //  导入白名单管理函数
-import { clearUserContextHistory } from '../storage/context-storage'; //  导入上下文清理函数
-import { handleSearchCommand } from './search-handler'; //  !!!  导入 handleSearchCommand  !!!
+	isUserBlacklisted,
+	addUserToBlacklist,
+	removeUserFromBlacklist,
+} from '../utils/utils';
+import { clearUserContextHistory } from '../storage/context-storage';
+// import { handleSearchCommand } from './search-handler';
 import { addSummaryGroupToWhitelist, removeSummaryGroupFromWhitelist } from '../summary/summary-config';
 
-//  !!!  更新 Bot 命令列表，添加 help 命令  !!!
 const botCommands = [
-	{ command: 'start', description: '查看机器人介绍和使用方法 (白名单用户)' },
-	{ command: 'help', description: '查看可用命令列表 (白名单用户)' }, //  !!!  新增 help 命令  !!!
-	{ command: 'search', description: '使用 Google 搜索 (所有用户可用)' }, //  !!!  新增 search 命令  !!!
-	{ command: 'clear_user_context', description: '清理您在本群组的历史上下文 (所有用户可用)' },
-	// { command: 'clear_group_context', description: '清理本群组所有用户的对话上下文 (白名单用户)' },
+	{ command: 'start', description: '查看机器人介绍和使用方法' },
+	{ command: 'help', description: '查看可用命令列表' },
+	{ command: 'search', description: '使用 Google 搜索' },
+	{ command: 'clear_user_context', description: '清理您在本群组的历史上下文' },
 	{ command: 'whitelist_group', description: '将当前群组加入白名单 (白名单用户)' },
 	{ command: 'unwhitelist_group', description: '将当前群组从白名单移除 (白名单用户)' },
+	{ command: 'ban', description: '将用户加入黑名单 (白名单用户)' },
+	{ command: 'uban', description: '将用户从黑名单移除 (白名单用户)' },
 ];
-export { botCommands }; //  导出 botCommands 供 index.js 使用
+export { botCommands };
 
 /**
  * 处理 Bot 命令 -  !!!  修正函数定义，添加 defaultModelName 和 taskQueueKv 参数，并调整参数顺序 !!!
@@ -59,7 +62,8 @@ export async function handleBotCommand(message, env, botName, sendTelegramMessag
 					isBotCommand = true;
 					break; //  找到第一个 bot_command entity 即可，跳出循环
 				} else {
-					console.log(`handleBotCommand: 检测到 bot_command entity, 但不是针对本 Bot (${botNameMention}), 忽略: ${commandText}`); //  更详细的日志
+					console.log(`检测到 bot 命令：${commandText}, 但不是针对本 Bot, 忽略 `); //  更详细的日志
+					return new Response('OK');
 				}
 			}
 		}
@@ -69,43 +73,46 @@ export async function handleBotCommand(message, env, botName, sendTelegramMessag
 
 	const botConfigKv = env.BOT_CONFIG;
 	const userWhitelistKey = env.USER_WHITELIST_KV_KEY;
+	const userBlacklistKey = env.USER_BLACKLIST_KV_KEY;
+
 	const userId = message.from.id;
 	const groupId = message.chat.id;
-	const chatType = message.chat.type; //  !!!  获取 chat type
 
-	if (chatType === 'private') {
-		//  !!!  私聊消息中，忽略所有命令 !!!
-		console.log('handleBotCommand: 私聊消息中检测到命令，忽略处理');
-		return new Response('OK'); //  私聊消息中，忽略所有命令
+	//  !!!  黑名单检测 (在命令处理之前)  !!!
+	const isBlacklistedUser = await isUserBlacklisted(botConfigKv, userBlacklistKey, userId); //  !!!  检查用户是否在黑名单 !!!
+	if (isBlacklistedUser) {
+		console.log(`用户 ${userId} 在黑名单中，拒绝执行命令 ${command}`);
+		const replyText = '😅抱歉！你无权使用此机器人！'; //  黑名单回复消息
+		await handleCommandReplyAndCleanup(
+			env.BOT_TOKEN,
+			groupId,
+			replyText,
+			message.message_id,
+			sendTelegramMessage,
+			deleteTelegramMessage,
+			env,
+			message.message_id,
+			botName,
+		); //  发送黑名单回复并清理消息
+		return new Response('OK'); //  直接返回，不再执行命令
 	}
 
 	let replyText = '🤖️ 未知命令'; // 默认回复
 	let isWhitelistedUserForCommand = false; //  !!!  添加变量，标记用户是否有权限执行命令
 
-	//  !!!  /search 命令的特殊权限处理  !!!
-	if (command === 'search') {
+	//  !!!  /search 命令的特殊权限处理 (保持不变) !!!
+	if (command === 'start' || command === 'help' || command === 'search' || command === 'clear_user_context') {
 		const groupWhitelistKey = env.GROUP_WHITELIST_KV_KEY;
 		const groupWhitelist = (await getJsonFromKv(botConfigKv, groupWhitelistKey)) || [];
 		if (groupWhitelist.includes(groupId)) {
-			console.log(`群组 ${groupId} 在白名单中，允许群组内所有用户使用 /search 命令`);
+			console.log(`群组 ${groupId} 在白名单中，允许群组内所有用户使用特定命令`);
 			isWhitelistedUserForCommand = true; //  白名单群组内的所有用户都可以使用 /search 命令
 		} else {
-			console.log(`群组 ${groupId} 不在白名单中，/search 命令仅限白名单用户使用`);
+			console.log(`群组 ${groupId} 不在白名单中，特定命令仅限白名单用户使用`);
 			isWhitelistedUserForCommand = await isUserWhitelisted(botConfigKv, userWhitelistKey, userId); //  非白名单群组，仍然需要用户在白名单中
 		}
-	} else if (command === 'clear_user_context') {
-		//  !!!  /clear_user_context 命令的特殊权限处理 !!!
-		const groupWhitelistKey = env.GROUP_WHITELIST_KV_KEY;
-		const groupWhitelist = (await getJsonFromKv(botConfigKv, groupWhitelistKey)) || [];
-		if (groupWhitelist.includes(groupId)) {
-			console.log(`群组 ${groupId} 在白名单中，允许群组内所有用户使用 /clear_user_context 命令`);
-			isWhitelistedUserForCommand = true; //  白名单群组内的所有用户都可以使用 /clear_user_context 命令
-		} else {
-			console.log(`群组 ${groupId} 不在白名单中，/clear_user_context 命令仅限白名单群组内使用`);
-			isWhitelistedUserForCommand = false; //  非白名单群组，拒绝执行 /clear_user_context 命令
-		}
 	} else {
-		//  !!!  其他命令的通用权限检查  !!!
+		//  !!!  其他命令的通用权限检查 (保持不变) !!!
 		isWhitelistedUserForCommand = await isUserWhitelisted(botConfigKv, userWhitelistKey, userId); //  其他命令仍然需要用户在白名单中
 	}
 
@@ -131,53 +138,20 @@ export async function handleBotCommand(message, env, botName, sendTelegramMessag
 	switch (command) {
 		case 'start':
 			replyText =
-				'👋 <b>您好，我是 Athena 助手！</b>\n\n' + //  更友好的欢迎语，加粗
-				'我是一位基于 <b>Gemini API</b> 的群组助手，我的任务是帮助大家配置 <b>Sing-box</b> 并使用 <b>GUI.for.SingBox</b> 应用。\n\n' + // 突出 Gemini API, Sing-box 和 GUI.for.SingBox，加粗
-				'在群组中，我主要通过以下几种方式与您互动，解答关于 <b>Sing-box</b> 和 <b>GUI.for.SingBox</b> 的疑问：\n\n' + //  更清晰的引导，突出互动方式
-				'🤖 当前使用的 AI 模型：<code>' +
-				defaultModelName +
-				'</code>\n\n' + //  模型信息，使用 code 格式化模型名称
-				'<b>✨ 主要功能：</b>\n\n' + //  功能介绍，加粗标题
-				'1. 💡 <b>Sing-box 设置助手</b>：基于强大的 Gemini API，为您解答 Sing-box 配置和使用中的各种疑问。\n' + //  更生动的描述，加粗功能名称
-				'2. 💬 <b>多轮对话记忆</b>：支持上下文对话，记住之前的对话内容，提供更连贯的交流体验（仅限直接 <b>@</b> 提问方式）。\n' + //  更清晰的描述，加粗功能名称，并注明上下文对话的适用范围
-				'3. 🖼️ <b>图片消息理解</b>：支持文本和图片消息，您可以发送 <b>Sing-box</b> 或 <b>GUI.for.SingBox</b> 截图并 <b>@</b><code>' +
-				botName +
-				'</code> 提问，我可以尝试理解图片内容并解答。\n' + //  更形象的描述，突出图片功能，加粗 @ 提及和 botName
-				'4. 🔎 <b>Google 搜索</b>：使用 <code>/search@' +
-				botName +
-				' 关键词</code> 命令，我可以调用 Google 搜索功能为您查找更广泛的信息（不记录上下文，每次搜索为全新会话）。\n' + //  突出 Google 搜索功能和命令，使用 code 格式化命令，并注明不记录上下文
-				'5. ⏱️ <b>群组冷却机制</b>：为了避免 API 调用过载，群组内有请求频率限制，默认冷却时间为 <b>1.5 分钟</b>。白名单用户不受冷却限制。\n\n' + //  新增冷却功能介绍，加粗冷却时间和功能名称
-				'<b>🛠️ 互动方式：</b>\n\n' + //  使用方法，加粗标题，修改为“互动方式”更贴切
-				'1. 💬 <b>直接提问</b>：在本群组中，直接 <b>@</b><code>' +
-				botName +
-				'</code> + 您的 <b>问题</b> 即可提问（支持上下文对话）。\n' + //  更简洁的描述，加粗关键操作，注明支持上下文
-				'2. 📸 <b>图片提问</b>：发送 <b>Sing-box</b> 或 <b>GUI.for.SingBox</b> 相关截图，并 <b>@</b><code>' +
-				botName +
-				'</code> + 您的 <b>问题</b>，我会尝试理解图片内容并回答（支持上下文对话）。\n' + //  更明确的指导，加粗关键词，注明支持上下文
-				'3. 🗣️ <b>回复提问</b>：在群组中，回复任何消息并 <b>@</b><code>' +
-				botName +
-				'</code> + 您的 <b>问题</b>，我会将 <b>被回复消息</b> 的内容作为参考进行解答（<b>不记录上下文</b>，每次回复提问为全新会话）。\n' + //  新增回复提问互动方式，详细解释，加粗关键词，注明不记录上下文
-				'4. 🔍 <b>Google 搜索</b>：使用命令 <code>/search@' +
-				botName +
-				' 关键词</code> 进行 Google 搜索，例如：<code>/search@' +
-				botName +
-				' 最新 Sing-box 教程</code>（<b>不记录上下文</b>，每次搜索为全新会话）。\n\n' + //  提供更具体的示例，使用 code 格式化命令和示例，注明不记录上下文
-				'⏱️ <b>关于冷却：</b>\n\n' + //  新增“关于冷却”小标题
-				'   为了保证所有群组的稳定使用，机器人对群组消息请求频率进行了限制，默认冷却时间为 <b>1.5 分钟</b>。\n' + //  解释冷却原因和默认时长，加粗
-				'   如果您是白名单用户，则不受冷却限制。\n' + //  说明白名单用户不受限制
-				'   Google 搜索功能有独立的冷却时间，为 <b>3 分钟</b>，与普通提问冷却互不影响。\n\n' + //  补充说明 Google 搜索的独立冷却，加粗
-				'<b>📮 私聊反馈：</b>\n\n' +
-				'   您私聊发送给我的任何消息，都会被自动转发给我的维护人员，您的反馈和建议对我很重要！\n\n' + //  !!!  添加私聊反馈功能描述  !!!
-				'🤓 <b>请注意，本助手目前还不具备算命功能哦~</b>\n\n' + //  趣味性提示，使用 sub 标签缩小字体
-				'<b>⚠️ 格式规范：</b>为了确保我能正确理解您的指令，请<b>务必使用规范的命令和 @ 格式</b>，例如：<code>/start@' +
-				botName +
-				'</code>， <code>/search@' +
-				botName +
-				' 关键词</code>，以及直接 <code>@' +
-				botName +
-				' 提问内容</code>。 避免在命令或 @ 符号中使用特殊字符或空格。\n\n' + //  !!!  强调规范格式的重要性  !!!
-				'⚠️ <b>重要提示：</b>我会尽力保证 Sing-box 配置信息的准确性，但网络环境和软件版本可能会变化，请务必仔细验证信息，并参考官方文档。\n\n' + //  重要提示，加粗标题
-				'如有任何疑问或建议，欢迎随时提出！'; //  结尾语
+				`👋 大家好！我是基于 <b>Gemini API</b> 的群组助手，我的任务是帮助大家配置 <b>Sing-box</b> 和使用 <b>GUI.for.SingBox</b> 应用。\n\n` +
+				`🤖️ 模型: <code>${defaultModelName}</code>\n\n` +
+				`✨ <b>功能简介</b>：\n\n` +
+				`1. 💬 <b>多轮对话</b>：支持上下文对话记忆。\n` +
+				`2. 🖼️ <b>图片理解</b>：可理解图片内容。\n` +
+				`3. 🗣️ <b>连续对话</b>：冷却后回复我的消息即可继续对话。\n` +
+				`4. 📝 <b>引用提问</b>：回复某条消息即可引用。\n` +
+				`5. 🔍 <b>Google 搜索</b>：<code>/search@${botName} 关键词</code>\n` +
+				`6. 🧹 <b>清理上下文</b>：<code>/clear_user_context@${botName}</code> 清理个人对话记忆。\n` +
+				`7. 📅 <b>每日总结</b>：记录群聊消息并每日总结。\n\n` +
+				`⏱️ <b>冷却机制</b>：群组提问有频率限制。\n\n` +
+				`⚠️ <b>注意</b>：请详细描述问题，我不会算命。\n\n` +
+				`📝 <b>格式</b>：使用规范命令和 <code>@</code> 格式。\n\n` +
+				`📮 <b>反馈</b>：私聊我直接反馈。(<b>仅限和 Bot 有关的问题</b>)\n`;
 			const startSendResult = await sendTelegramMessage(env.BOT_TOKEN, groupId, replyText, message.message_id, 'HTML'); // 发送回复
 			if (startSendResult.ok && startSendResult.message_id) {
 				//  !!!  记录 start 命令回复消息  !!!
@@ -190,7 +164,6 @@ export async function handleBotCommand(message, env, botName, sendTelegramMessag
 				//  遍历 botCommands 数组，动态生成 help 信息
 				replyText += `<code>/${cmd.command}@${botName}</code> - ${cmd.description}\n`; //  !!!  添加 (白名单用户) 提示  !!!
 			});
-			replyText += `\n例如： <code>/search@${botName}  sing-box 的最新版有哪些变化？</code>`;
 			const helpSendResult = await sendTelegramMessage(env.BOT_TOKEN, groupId, replyText, message.message_id, 'HTML'); // 发送回复
 			if (helpSendResult.ok && helpSendResult.message_id) {
 				//  !!!  记录 help 命令回复消息  !!!
@@ -225,7 +198,6 @@ export async function handleBotCommand(message, env, botName, sendTelegramMessag
 			try {
 				await addSummaryGroupToWhitelist(env, groupId);
 				replyText += '\n\n✅ 本群组已同步添加到每日总结白名单。';
-				console.log(`群组 ${groupId} 已同步添加到总结白名单`);
 			} catch (summaryError) {
 				console.error(`添加群组 ${groupId} 到总结白名单失败:`, summaryError);
 				replyText += '\n\n⚠️  添加到每日总结白名单 <b>失败</b>，请稍后手动添加或联系管理员。';
@@ -253,7 +225,6 @@ export async function handleBotCommand(message, env, botName, sendTelegramMessag
 			try {
 				await removeSummaryGroupFromWhitelist(env, groupId);
 				replyText += '\n\n✅ 本群组已同步从每日总结白名单移除。';
-				console.log(`群组 ${groupId} 已同步从总结白名单移除`);
 			} catch (summaryError) {
 				console.error(`从总结白名单移除群组 ${groupId} 失败:`, summaryError);
 				replyText += '\n\n⚠️  从每日总结白名单 <b>移除失败</b>，请稍后手动移除或联系管理员。';
@@ -272,12 +243,16 @@ export async function handleBotCommand(message, env, botName, sendTelegramMessag
 			); //  !!!  传递 env.TASK_QUEUE_KV !!!
 			return new Response('OK');
 		case 'search': //  !!!  search 命令的处理 !!!
-			// replyText = `😅 <b>抱歉！搜索功能正在维护中...</b>` ;
-			// await handleCommandReplyAndCleanup(env.BOT_TOKEN, groupId, replyText, message.message_id, sendTelegramMessage, deleteTelegramMessage, env, message.message_id, botName);
-			// return new Response('OK');
-			console.log('handleBotCommand: 检测到 /search 命令，调用 handleSearchCommand 处理');
-			//  !!!  /search 命令的冷却检查和处理，全部移动到 handleSearchCommand 函数中 !!!
-			return handleSearchCommand(message, env, botName, sendTelegramMessage, defaultModelName, deleteTelegramMessage, taskQueueKv); //  !!!  直接调用 handleSearchCommand，不再进行任何冷却检查 !!!
+			replyText = `😅 <b>抱歉！搜索功能正在维护中...</b>`;
+			await sendTelegramMessage(env.BOT_TOKEN, groupId, replyText, message.message_id, 'HTML');
+			return new Response('OK');
+		// console.log('handleBotCommand: 检测到 /search 命令，调用 handleSearchCommand 处理');
+		//  !!!  /search 命令的冷却检查和处理，全部移动到 handleSearchCommand 函数中 !!!
+		// return handleSearchCommand(message, env, botName, sendTelegramMessage, defaultModelName, deleteTelegramMessage, taskQueueKv); //  !!!  直接调用 handleSearchCommand，不再进行任何冷却检查 !!!
+		case 'ban': //  !!!  ban 命令处理  !!!
+			return handleBanCommand(message, env, botName, sendTelegramMessage, deleteTelegramMessage); //  !!!  调用 handleBanCommand 函数 !!!
+		case 'uban': //  !!!  uban 命令处理  !!!
+			return handleUbanCommand(message, env, botName, sendTelegramMessage, deleteTelegramMessage); //  !!!  调用 handleUbanCommand 函数 !!!
 		default:
 			console.log(`handleBotCommand: 未知命令: ${command}`);
 			replyText = `🤖️ 未知命令：${command}。\n\n可以使用 /help@${botName} 查看可用命令。`; //  !!!  修改为提示使用 /help 命令  !!!
@@ -306,6 +281,88 @@ export async function handleBotCommand(message, env, botName, sendTelegramMessag
 			}
 			return new Response('OK');
 	}
+}
+
+/**
+ * 处理 /ban 命令
+ * @param {object} message Telegram message 对象
+ * @param {object} env Cloudflare Worker environment
+ * @param {string} botName 机器人名称
+ * @param {function} sendTelegramMessage  发送 Telegram 消息的函数
+ * @param {function} deleteTelegramMessage  删除 Telegram 消息的函数
+ * @returns {Promise<Response>}
+ */
+async function handleBanCommand(message, env, botName, sendTelegramMessage, deleteTelegramMessage) {
+	//  !!!  新增 handleBanCommand 函数  !!!
+	console.log('处理 /ban 命令');
+	const groupId = message.chat.id;
+	const botConfigKv = env.BOT_CONFIG;
+	const userBlacklistKey = env.USER_BLACKLIST_KV_KEY;
+	const commandText = message.text || message.caption || '';
+	const args = commandText.split(/\s+/).slice(1); //  !!!  修正为 slice(1) !!!
+	const targetUserId = parseInt(args[0]); //  尝试解析 userId 为整数
+
+	if (!targetUserId || isNaN(targetUserId)) {
+		const replyText = '🚫 请提供要加入黑名单的 <b>有效用户 ID</b>。\n\n例如：<code>/ban@' + botName + ' 1234567890</code>';
+		await sendTelegramMessage(env.BOT_TOKEN, groupId, replyText, message.message_id, 'HTML');
+		return new Response('OK');
+	}
+
+	await addUserToBlacklist(botConfigKv, userBlacklistKey, targetUserId); //  添加到黑名单
+	const replyText = `✅ 用户 <code>${targetUserId}</code> 已加入黑名单。`;
+	await handleCommandReplyAndCleanup(
+		env.BOT_TOKEN,
+		groupId,
+		replyText,
+		message.message_id,
+		sendTelegramMessage,
+		deleteTelegramMessage,
+		env,
+		message.message_id,
+		botName,
+	);
+	return new Response('OK');
+}
+
+/**
+ * 处理 /uban 命令
+ * @param {object} message Telegram message 对象
+ * @param {object} env Cloudflare Worker environment
+ * @param {string} botName 机器人名称
+ * @param {function} sendTelegramMessage  发送 Telegram 消息的函数
+ * @param {function} deleteTelegramMessage  删除 Telegram 消息的函数
+ * @returns {Promise<Response>}
+ */
+async function handleUbanCommand(message, env, botName, sendTelegramMessage, deleteTelegramMessage) {
+	//  !!!  新增 handleUbanCommand 函数  !!!
+	console.log('处理 /uban 命令');
+	const groupId = message.chat.id;
+	const botConfigKv = env.BOT_CONFIG;
+	const userBlacklistKey = env.USER_BLACKLIST_KV_KEY;
+	const commandText = message.text || message.caption || '';
+	const args = commandText.split(/\s+/).slice(1); //  !!!  修正为 slice(1) !!!
+	const targetUserId = parseInt(args[0]); //  尝试解析 userId 为整数
+
+	if (!targetUserId || isNaN(targetUserId)) {
+		const replyText = '🚫 请提供要从黑名单移除的 <b>有效用户 ID</b>。\n\n例如：<code>/uban@' + botName + ' 1234567890</code>';
+		await sendTelegramMessage(env.BOT_TOKEN, groupId, replyText, message.message_id, 'HTML');
+		return new Response('OK');
+	}
+
+	await removeUserFromBlacklist(botConfigKv, userBlacklistKey, targetUserId); //  从黑名单移除
+	const replyText = `✅ 用户 <code>${targetUserId}</code> 已从黑名单移除。`;
+	await handleCommandReplyAndCleanup(
+		env.BOT_TOKEN,
+		groupId,
+		replyText,
+		message.message_id,
+		sendTelegramMessage,
+		deleteTelegramMessage,
+		env,
+		message.message_id,
+		botName,
+	);
+	return new Response('OK');
 }
 
 /**
@@ -339,7 +396,6 @@ export async function handleCommandReplyAndCleanup(
 		console.log(`机器人回复消息 ID: ${botReplyMessageId}`);
 
 		await recordBotReplyMessage(env, botName, replyText, chatId); //  调用 recordBotReplyMessage 记录
-		console.log('已记录命令回复消息');
 
 		const deletionReadyTimestamp = Date.now() + 3000; //  3 秒后的时间戳
 		const deletionSignalKey = `delete_message:${chatId}:${commandMessageId}:${botReplyMessageId}`; //  唯一的 KV 键

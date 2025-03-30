@@ -30,7 +30,7 @@ export async function updateUserContextHistory(
 	groupId,
 	userId,
 	messageContent,
-	maxHistoryLength = 20,
+	maxHistoryLength = 10,
 ) {
 	//  !!!  恢复为 messageContent 参数  !!!
 	const key = `context:${groupId}:${userId}`;

@@ -39,11 +39,19 @@ export async function putJsonToKv(kvNamespace, key, jsonData) {
 
 /**
  * 将字符串编码为 Base64
- * @param {string} str
+ * * -  !!!  修改:  直接接受 ArrayBuffer  !!!
+ * @param {ArrayBuffer} arrayBuffer
  * @returns {string}
  */
-export function base64Encode(str) {
-	return btoa(str);
+export function base64Encode(arrayBuffer) {
+	//  !!!  修改:  直接将 ArrayBuffer 转换为 Uint8Array 后，再构建二进制字符串  !!!
+	let binary = '';
+	const bytes = new Uint8Array(arrayBuffer);
+	const len = bytes.byteLength;
+	for (let i = 0; i < len; i++) {
+		binary += String.fromCharCode(bytes[i]);
+	}
+	return btoa(binary);
 }
 
 /**
@@ -53,6 +61,69 @@ export function base64Encode(str) {
  */
 export function base64Decode(base64Str) {
 	return atob(base64Str);
+}
+
+/**
+ * 获取用户黑名单
+ * @param {KVNamespace} botConfigKvNamespace
+ * @param {string} userBlacklistKey
+ * @returns {Promise<Array<number>>}
+ */
+export async function getUserBlacklist(botConfigKvNamespace, userBlacklistKey) {
+	//  !!!  新增 getUserBlacklist 函数  !!!
+	return (await getJsonFromKv(botConfigKvNamespace, userBlacklistKey)) || []; // 默认返回空数组
+}
+
+/**
+ * 向用户黑名单添加用户
+ * @param {KVNamespace} botConfigKvNamespace
+ * @param {string} userBlacklistKey
+ * @param {number} userId
+ * @returns {Promise<void>}
+ */
+export async function addUserToBlacklist(botConfigKvNamespace, userBlacklistKey, userId) {
+	//  !!!  新增 addUserToBlacklist 函数  !!!
+	let blacklist = await getUserBlacklist(botConfigKvNamespace, userBlacklistKey);
+	if (!blacklist.includes(userId)) {
+		blacklist.push(userId);
+		await putJsonToKv(botConfigKvNamespace, userBlacklistKey, blacklist);
+		console.log(`用户 ${userId} 已添加到用户黑名单`);
+	} else {
+		console.log(`用户 ${userId} 已在用户黑名单中，无需重复添加`);
+	}
+}
+
+/**
+ * 从用户黑名单移除用户
+ * @param {KVNamespace} botConfigKvNamespace
+ * @param {string} userBlacklistKey
+ * @param {number} userId
+ * @returns {Promise<void>}
+ */
+export async function removeUserFromBlacklist(botConfigKvNamespace, userBlacklistKey, userId) {
+	//  !!!  新增 removeUserFromBlacklist 函数  !!!
+	let blacklist = await getUserBlacklist(botConfigKvNamespace, userBlacklistKey);
+	const index = blacklist.indexOf(userId);
+	if (index > -1) {
+		blacklist.splice(index, 1);
+		await putJsonToKv(botConfigKvNamespace, userBlacklistKey, blacklist);
+		console.log(`用户 ${userId} 已从用户黑名单移除`);
+	} else {
+		console.log(`用户 ${userId} 不在用户黑名单中，无法移除`);
+	}
+}
+
+/**
+ * 检查用户是否在用户黑名单中
+ * @param {KVNamespace} botConfigKvNamespace
+ * @param {string} userBlacklistKey
+ * @param {number} userId
+ * @returns {Promise<boolean>}
+ */
+export async function isUserBlacklisted(botConfigKvNamespace, userBlacklistKey, userId) {
+	//  !!!  新增 isUserBlacklisted 函数  !!!
+	const blacklist = await getUserBlacklist(botConfigKvNamespace, userBlacklistKey);
+	return blacklist.includes(userId);
 }
 
 /**

@@ -7,7 +7,7 @@
  */
 export function escapeHtml(text) {
 	if (!text) return '';
-	return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+	return text.replace(/&/g, '&amp;').replace(/</g, '&lt').replace(/>/g, '&gt');
 }
 
 /**
@@ -33,25 +33,33 @@ export function formatGeminiReply(text) {
 		// 链接格式化 ([text](url)  =>  <a href="url">text</a>)
 		formattedText = formattedText.replace(/\[([^\]]+?)\]\(([^\)]+?)\)/g, '<a href="$2">$1</a>');
 
-		// 粗体格式化 (**bold**  =>  <b>bold</b>)
+		// 粗体格式化 (**bold**  =>  <b>bold</b>) -  同时支持 ** 和 __ 粗体
 		formattedText = formattedText.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
+		formattedText = formattedText.replace(/__(.*?)\_\_/g, '<b>$1</b>'); //  !!!  新增 __ 粗体支持，统一使用 <b> 标签 !!!
 
-		// 下划线格式化 (__underline__  =>  <u>underline</u>)
-		formattedText = formattedText.replace(/__(.*?)__/g, '<u>$1</u>');
+		// 斜体格式化 (*italic*  =>  <i>italic</i>) -  同时支持 * 和 _ 斜体
+		formattedText = formattedText.replace(/\*(.*?)\*/g, '<i>$1</i>');
+		formattedText = formattedText.replace(/\_(.*?)\_/g, '<i>$1</i>'); //  !!!  新增 _ 斜体支持，统一使用 <i> 标签 !!!
+
+		// 下划线格式化 (__underline__  =>  <u>underline</u>) -  文档中 HTML 示例使用 <u>
+		formattedText = formattedText.replace(/<u>(.*?)<\/u>/gi, '<u>$1</u>'); //  !!!  确保已有的 <u> 标签不被错误替换 !!!
+		formattedText = formattedText.replace(/__(.*?)\_\_/g, '<u>$1</u>'); //  !!!  保留 __ 下划线支持，但使用 <u> 标签 !!!  (与粗体 __ 区分，此处可能有歧义，根据实际效果调整)
 
 		// 删除线格式化 (~strike~  =>  <s>strike</s>)
 		formattedText = formattedText.replace(/~(.*?)~/g, '<s>$1</s>');
 
-		// 剧透格式化 (||spoiler||  =>  <tg-spoiler>spoiler</tg-spoiler>)
+		// 剧透格式化 (||spoiler||  =>  <tg-spoiler>spoiler</tg-spoiler>) -  同时支持 <tg-spoiler> 和 <span class="tg-spoiler">
 		formattedText = formattedText.replace(/\|\|(.*?)\|\|/g, '<tg-spoiler>$1</tg-spoiler>');
+		formattedText = formattedText.replace(/<tg-spoiler>(.*?)<\/tg-spoiler>/gi, '<tg-spoiler>$1</tg-spoiler>'); //  !!! 确保已有的 <tg-spoiler> 标签不被错误替换 !!!
+		formattedText = formattedText.replace(/<span class="tg-spoiler">(.*?)<\/span>/gi, '<tg-spoiler>$1</tg-spoiler>'); //  !!! 统一使用 <tg-spoiler> 标签 !!!
 
-		// 引用块格式化 (> quote  =>  <blockquote>quote</blockquote>) -  处理多行引用
+		// 引用块格式化 (> quote  =>  <blockquote>quote</blockquote>) -  处理多行引用 (保持不变)
 		formattedText = formattedText.replace(/(^> [^\n]+(\n> [^\n]+)*)(?:\n|$)/gm, (match) => {
 			const blockquoteContent = match.replace(/^> /gm, '').trim(); // 去除每行开头的 "> " 和尾部空白
 			return `<blockquote>${blockquoteContent}</blockquote>`;
 		});
 
-		// 可展开引用块格式化 (>> quote  =>  <blockquote expandable>quote</blockquote>) - 处理多行可展开引用
+		// 可展开引用块格式化 (>> quote  =>  <blockquote expandable>quote</blockquote>) - 处理多行可展开引用 (保持不变)
 		formattedText = formattedText.replace(/(^>> [^\n]+(\n>> [^\n]+)*)(?:\n|$)/gm, (match) => {
 			const expandableBlockquoteContent = match.replace(/^>> /gm, '').trim(); // 去除每行开头的 ">> " 和尾部空白
 			return `<blockquote expandable>${expandableBlockquoteContent}</blockquote>`;
@@ -65,63 +73,38 @@ export function formatGeminiReply(text) {
 }
 
 /**
- * 格式化 HTML 文本为 Telegram MarkdownV2 格式 -  用于 HTML 格式发送失败时的备选方案
- *  -  需要处理 MarkdownV2 的转义规则，确保转换后的文本在 MarkdownV2 模式下正确解析
- * @param {string} htmlText  已经格式化为 HTML 的文本 (formatGeminiReply 函数的输出)
+ * 格式化 Markdown 文本为 Telegram MarkdownV2 格式
+ *  -  将标准 Markdown 语法转换为 Telegram MarkdownV2 语法
+ *  -  并转义 MarkdownV2 语法中的特殊字符
+ * @param {string} markdownText  标准 Markdown 文本
  * @returns {string}  格式化后的 MarkdownV2 文本
  */
-export function formatGeminiReplyMarkdownV2(htmlText) {
-	if (!htmlText) return '';
+export function formatGeminiReplyMarkdownV2(markdownText) {
+	if (!markdownText) return '';
 
-	let markdownv2Text = htmlText;
+	let markdownv2Text = markdownText;
 
 	try {
-		//  反向转换 HTML 标签为 MarkdownV2 语法
+		//  转换 Markdown 语法为 MarkdownV2 语法
 
-		// <b>bold</b>  =>  *bold*
-		markdownv2Text = markdownv2Text.replace(/<b>(.*?)<\/b>/gi, '*$1*');
-		markdownv2Text = markdownv2Text.replace(/<strong>(.*?)<\/strong>/gi, '*$1*'); //  兼容 <strong> 标签
+		// 粗体:  **bold**  =>  *bold*,  __bold__  =>  *bold*
+		markdownv2Text = markdownv2Text.replace(/\*\*(.*?)\*\*/g, '*$1*');
+		markdownv2Text = markdownv2Text.replace(/__(.*?)\_\_/g, '*$1*');
 
-		// <i>italic</i>  =>  _italic_
-		markdownv2Text = markdownv2Text.replace(/<i>(.*?)<\/i>/gi, '_$1_');
-		markdownv2Text = markdownv2Text.replace(/<em>(.*?)<\/em>/gi, '_$1_'); //  兼容 <em> 标签
+		// 斜体:  *italic*  =>  _italic_,  _italic_  =>  _italic_
+		markdownv2Text = markdownv2Text.replace(/\*(.*?)\*/g, '_$1_');
+		markdownv2Text = markdownv2Text.replace(/\_(.*?)\_/g, '_$1_');
 
-		// <u>underline</u>  =>  __underline__
-		markdownv2Text = markdownv2Text.replace(/<u>(.*?)<\/u>/gi, '__$1__');
-		markdownv2Text = markdownv2Text.replace(/<ins>(.*?)<\/ins>/gi, '__$1__'); // 兼容 <ins> 标签
+		// 删除线:  ~~strikethrough~~  =>  ~strikethrough~
+		markdownv2Text = markdownv2Text.replace(/~~(.*?)~~/g, '~$1~');
 
-		// <s>strikethrough</s>  =>  ~strikethrough~
-		markdownv2Text = markdownv2Text.replace(/<s>(.*?)<\/s>/gi, '~$1~');
-		markdownv2Text = markdownv2Text.replace(/<strike>(.*?)<\/strike>/gi, '~$1~'); //  兼容 <strike> 标签
-		markdownv2Text = markdownv2Text.replace(/<del>(.*?)<\/del>/gi, '~$1~'); //  兼容 <del> 标签
-
-		// <tg-spoiler>spoiler</tg-spoiler>  =>  ||spoiler||
-		markdownv2Text = markdownv2Text.replace(/<tg-spoiler>(.*?)<\/tg-spoiler>/gi, '||$1||');
-		markdownv2Text = markdownv2Text.replace(/<span class="tg-spoiler">(.*?)<\/span>/gi, '||$1||'); // 兼容 <span class="tg-spoiler">
-
-		// <code>inline code</code>  =>  `inline code`
-		markdownv2Text = markdownv2Text.replace(/<code>(.*?)<\/code>/gi, '`$1`');
-
-		// <pre><code class="language-lang">code block</code></pre>  =>  ```lang\ncode block\n```
-		markdownv2Text = markdownv2Text.replace(/<pre><code class="language-(\w+)">(.*?)<\/code><\/pre>/gi, '```$1\n$2\n```');
-		markdownv2Text = markdownv2Text.replace(/<pre><code>(.*?)<\/code><\/pre>/gi, '``````\n$1\n``````'); //  处理没有 language class 的代码块
-
-		// <a href="url">link text</a>  =>  [link text](url)
-		markdownv2Text = markdownv2Text.replace(/<a href="([^"]+?)">(.*?)<\/a>/gi, '[$2]($1)');
-
-		// <blockquote>blockquote</blockquote>  =>  > blockquote  (需要处理换行)
-		markdownv2Text = markdownv2Text.replace(/<blockquote>(.*?)<\/blockquote>/gi, '> $1'.replace(/<br\s*\/?>/gi, '\n> ')); //  将 <br> 转换为换行 + "> "
-
-		// <blockquote expandable>expandable blockquote</blockquote>  =>  >> expandable blockquote (需要处理换行)
-		markdownv2Text = markdownv2Text.replace(/<blockquote expandable>(.*?)<\/blockquote>/gi, '>> $1'.replace(/<br\s*\/?>/gi, '\n>> ')); // 将 <br> 转换为换行 + ">> "
-
-		//  MarkdownV2 强制转义处理 -  在转换后的 MarkdownV2 文本中，转义 MarkdownV2 特殊字符
+		//  !!!  MarkdownV2 强制转义处理 -  转义 MarkdownV2 特殊字符  !!!
 		markdownv2Text = escapeMarkdownV2(markdownv2Text);
 
 		return markdownv2Text.trim();
 	} catch (error) {
-		console.error('HTML 文本转换为 MarkdownV2 格式时发生错误:', error);
-		return '格式化回复为 MarkdownV2 格式时出现问题，请检查 HTML 内容或转换规则。';
+		console.error('Markdown 文本转换为 MarkdownV2 格式时发生错误:', error);
+		return '格式化回复为 MarkdownV2 格式时出现问题，请检查 Markdown 内容或转换规则。';
 	}
 }
 
@@ -134,6 +117,7 @@ export function formatGeminiReplyMarkdownV2(htmlText) {
 function escapeMarkdownV2(text) {
 	if (!text) return '';
 
-	const markdownv2EscapeChars = /[_*[\]()~`>#+\-=|{}.!]/g; //  MarkdownV2 需要转义的特殊字符
+	//  !!!  合并所有需要转义的字符，并添加 "  !!!
+	const markdownv2EscapeChars = /[_*[\]()~`>#+\-=|{}.!\\"]/g; //  MarkdownV2 需要转义的特殊字符,  !!!  添加 "  !!!
 	return text.replace(markdownv2EscapeChars, '\\$&'); //  $&  表示匹配到的字符，前面加上 \ 进行转义
 }

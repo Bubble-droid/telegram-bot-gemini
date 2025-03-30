@@ -1,69 +1,68 @@
 // src/api/gemini-api.js
 
-import OpenAI from 'openai';
-
-let openaiClient;
-
 /**
- * 初始化 OpenAI 客户端 (兼容 Gemini API)
- * @param {string} apiKey Gemini API Key
- * @param {string} baseUrl Gemini API Base URL
- * @param {string} modelName Gemini 模型名称
- */
-export function initGeminiAPI(apiKey, baseUrl) {
-	openaiClient = new OpenAI({
-		apiKey: apiKey,
-		baseURL: baseUrl,
-	});
-	console.log('Gemini API 客户端初始化完成 (支持流式传输)'); //  修改日志，提示支持流式传输
-}
-
-/**
- * 调用 Gemini API 获取聊天回复 (流式传输) -  返回 ReadableStream
+ * 调用 Gemini API 获取聊天回复 (HTTP 请求)
  * @param {Array<object>} messages  消息内容 (包含上下文历史)
  * @param {string} modelName Gemini 模型名称
- * @returns {Promise<ReadableStream>}  返回 ReadableStream
+ * @returns {Promise<string>}  返回 Gemini API 文本回复
  */
-export async function getGeminiChatCompletion(messages, modelName) {
-	if (!openaiClient) {
-		throw new Error('Gemini API 客户端未初始化，请先调用 initGeminiAPI()');
+export async function getGeminiChatCompletion(env, messages, modelName) {
+	const apiKey = env.GEMINI_API_KEY; //  从环境变量中获取 API Key
+	const apiUrl = env.OPENAI_API_BASE_URL; //  从环境变量中获取 Base URL
+
+	if (!apiKey || !apiUrl) {
+		throw new Error('Gemini API Key 或 Base URL 未配置');
 	}
-	console.log('开始处理 @ 提问请求...');
-	console.log(`当前所使用的 AI 模型: ${modelName}`);
+
+	console.log('开始处理 API 请求 (HTTP)...');
+	console.log(`当前使用的 AI 模型：${modelName}`);
+
 	try {
 		const payload = {
-			//  !!!  构建完整的 payload 对象，用于日志输出  !!!
 			model: modelName,
 			messages: messages,
-			max_completion_tokens: 1024,
-			stream: true,
+			max_completion_tokens: 8192,
+			temperature: 0.7,
+			n: 1,
 		};
 
-		// console.log("发送 Gemini API 请求 (完整 payload):", JSON.stringify(payload, null, 2)); //  !!!  打印完整 payload !!!
+		// console.log('发送 Gemini API 请求 (完整 payload):', JSON.stringify(payload, null, 2)); //  打印完整 payload
 
-		//  !!!  启用 stream: true,  获取流式响应  !!!
-		const completion = await openaiClient.chat.completions.create(payload); //  使用 payload 对象
+		const response = await fetch(apiUrl, {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json',
+				Authorization: `Bearer ${apiKey}`, //  使用 API Key
+			},
+			body: JSON.stringify(payload),
+		});
 
-		//  !!!  返回 completion 对象 (ReadableStream)  !!!
-		return completion; //  返回流对象，而不是文本
-	} catch (error) {
-		console.error('调用 Gemini API 失败 (流式传输):', error);
-
-		//  !!!  简化错误日志，重点关注状态码和响应体  !!!
-		console.error('Gemini API 请求失败详情:');
-		console.error('  HTTP 状态码:', error.status);
-		console.error('  HTTP 状态文本:', error.statusText);
-
-		if (error.response) {
+		if (!response.ok) {
+			//  !!!  更详细的错误处理  !!!
+			console.error('Gemini API 请求失败 (HTTP):', response.status, response.statusText);
+			console.error('请求 URL:', apiUrl);
+			console.error('请求 Headers:', response.headers); // 打印响应头
 			try {
-				const responseBody = await error.response.json(); //  !!!  尝试解析 JSON 响应体 !!!
-				console.error('  响应体 (Response Body - JSON):', JSON.stringify(responseBody, null, 2)); //  !!!  记录 JSON 响应体 !!!
+				const errorBody = await response.json();
+				console.error('响应体 (JSON):', JSON.stringify(errorBody, null, 2)); // 尝试解析 JSON 错误体
 			} catch (jsonError) {
-				console.error('  响应体 (Response Body - Text):', await error.response.text()); //  !!!  如果 JSON 解析失败，记录纯文本响应体 !!!
+				const errorText = await response.text();
+				console.error('响应体 (Text):', errorText); //  如果 JSON 解析失败，打印文本错误体
 			}
-		} else {
-			console.error('  没有响应体 (No Response Body)'); //  !!!  如果 error.response 不存在，则没有响应体 !!!
+			throw new Error(`Gemini API 请求失败 (HTTP), 状态码: ${response.status}`); // 抛出错误，包含状态码
 		}
+
+		const responseData = await response.json();
+		// console.log("Gemini API 响应 (HTTP):", JSON.stringify(responseData, null, 2)); // 打印完整响应数据
+
+		const geminiReplyText = responseData.choices[0]?.message?.content; //  提取文本回复
+		if (!geminiReplyText) {
+			throw new Error('Gemini API 响应内容为空'); //  如果回复内容为空，抛出错误
+		}
+
+		return geminiReplyText; //  返回文本回复
+	} catch (error) {
+		console.error('调用 Gemini API 失败 (HTTP):', error);
 		throw error; //  将错误抛出，让调用者处理
 	}
 }

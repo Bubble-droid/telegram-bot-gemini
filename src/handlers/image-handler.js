@@ -51,7 +51,7 @@ export async function handleImageMessageForContext(message, env, isReply = false
 			return { role: 'user', content: [{ type: 'text', text: message.caption || '(图片消息) - 下载失败' }] };
 		}
 		const imageBuffer = await imageFileResponse.arrayBuffer();
-		const base64Image = base64Encode(String.fromCharCode(...new Uint8Array(imageBuffer)));
+		const base64Image = base64Encode(imageBuffer);
 		const base64ImageUrl = `data:image/jpeg;base64,${base64Image}`;
 
 		//  !!!  获取 botName 并移除 caption 中的 @botName  !!!

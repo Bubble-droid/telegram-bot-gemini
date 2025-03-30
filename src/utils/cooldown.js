@@ -127,3 +127,5 @@ export function parseDurationToMs(durationString) {
 			return 90000; // 默认 1.5 分钟 (90000 毫秒)，如果单位无法识别
 	}
 }
+
+export async function groupIsInCooldown() {}

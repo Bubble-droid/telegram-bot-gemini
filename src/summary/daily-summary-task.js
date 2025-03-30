@@ -3,6 +3,7 @@
 import { getJsonFromKv, putJsonToKv, sendErrorNotification } from '../utils/utils';
 // import { initGeminiAPI, getGeminiChatCompletion } from '../gemini'; // 移除 Gemini API 模块的导入
 import { formatGeminiReply } from '../utils/formatter'; // 确保导入 formatGeminiReply
+import { getGeminiChatCompletion } from '../api/gemini-api';
 
 /**
  * 启动每日群组消息记录
@@ -63,8 +64,16 @@ export async function stopDailyRecordAndSummarize(env, sendTelegramMessage) {
 				// 发送给 Gemini API 进行总结
 				const geminiSummary = await sendSummaryToGemini(env, groupHistory, sendTelegramMessage);
 				if (geminiSummary) {
-					const formattedSummaryText = formatGeminiReply(geminiSummary);
-					await sendTelegramMessage(env.BOT_TOKEN, groupId, formattedSummaryText, null, 'HTML');
+					if (geminiSummary.length > 4000) {
+						//  !!!  处理超长回复  !!!
+						const chunks = geminiSummary.match(/[\s\S]{1,4000}/g) || []; //  分割成 4000 字符的块
+						for (const chunk of chunks) {
+							await sendTelegramMessage(env.BOT_TOKEN, groupId, chunk, null, 'HTML');
+						}
+					} else {
+						await sendTelegramMessage(env.BOT_TOKEN, groupId, geminiSummary, null, 'HTML');
+					}
+
 					console.log(`群组 ${groupId} 总结发送成功`);
 				} else {
 					console.warn(`群组 ${groupId} 总结内容为空或获取失败`);
@@ -128,6 +137,8 @@ async function sendSummaryToGemini(env, groupHistory, sendTelegramMessage) {
 		return null;
 	}
 
+	const modelName = env.DEFAULT_GEMINI_MODEL_NAME;
+
 	try {
 		const systemPromptKv = env.SYSTEM_INIT_CONFIG;
 		const systemPromptKey = env.SUMMARY_SYSTEM_PROMPT_KV_KEY;
@@ -137,58 +148,19 @@ async function sendSummaryToGemini(env, groupHistory, sendTelegramMessage) {
 			groupHistory = JSON.stringify(groupHistory); //  如果仍然是对象，则先转换为 JSON 字符串
 		}
 
-		const messages = [
+		const geminiMessages = [
 			{
 				role: 'system',
 				content: systemPrompt,
 			},
 			{
 				role: 'user',
-				content: groupHistory, //  !!!  使用转义后的群组历史记录 !!!
+				content: groupHistory,
 			},
 		];
 
-		const payload = {
-			// 构建请求体 payload
-			model: env.DEFAULT_GEMINI_MODEL_NAME,
-			messages: messages,
-			max_completion_tokens: 2048,
-		};
-		const geminiApiUrl = `${env.OPENAI_API_BASE_URL}chat/completions`; // Gemini API endpoint URL
-
-		// console.log("发送 Gemini API 总结请求 (payload):", JSON.stringify(payload, null, 2)); // 可选：打印 payload
-
-		const response = await fetch(geminiApiUrl, {
-			// 使用 fetch 发送 HTTP POST 请求
-			method: 'POST',
-			headers: {
-				'Content-Type': 'application/json',
-				Authorization: `Bearer ${env.GEMINI_API_KEY}`, // 设置 Authorization header
-			},
-			body: JSON.stringify(payload), // 将 payload 转换为 JSON 字符串
-		});
-
-		if (!response.ok) {
-			const errorText = await response.text(); // 获取错误文本信息
-			console.error(`Gemini API 请求失败 (HTTP ${response.status}): ${errorText}`);
-			console.error('Gemini API 请求失败详情:');
-			console.error('  HTTP 状态码:', response.status);
-			console.error('  HTTP 状态文本:', response.statusText);
-			console.error('  响应体 (Response Body - Text):', errorText); // 打印详细错误信息
-			throw new Error(`Gemini API 请求失败，状态码: ${response.status}, 错误信息: ${errorText}`); // 抛出错误，方便上层处理
-		}
-
-		const geminiResponse = await response.json(); // 解析 JSON 响应
-		// const geminiText = geminiResponse.choices[0]?.message?.content; // 旧代码，适用于 openai 库的返回格式
-		const geminiText = geminiResponse.choices?.[0]?.message?.content; // 使用更安全的链式调用
-
-		if (geminiText) {
-			// console.log("成功获取 Gemini API 总结回复 (原始):", geminiText);
-			return geminiText;
-		} else {
-			console.warn('Gemini API 返回的总结内容为空');
-			return null;
-		}
+		const geminiReplyText = await getGeminiChatCompletion(env, geminiMessages, modelName);
+		return geminiReplyText;
 	} catch (error) {
 		console.error('调用 Gemini API 进行总结失败:', error);
 		await sendErrorNotification(
@@ -197,6 +169,6 @@ async function sendSummaryToGemini(env, groupHistory, sendTelegramMessage) {
 			'src/summary/daily-summary-task.js - sendSummaryToGemini 函数 - 调用 Gemini API 进行总结失败',
 			sendTelegramMessage,
 		);
-		return null;
 	}
+	return new Response('OK');
 }

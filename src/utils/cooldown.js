@@ -1,6 +1,6 @@
 // src/utils/cooldown.js
 
-import { getJsonFromKv, putJsonToKv } from '../utils/utils';
+import { getJsonFromKv, putJsonToKv, getUserWhitelist } from '../utils/utils';
 
 /**
  * 检查群组是否处于冷却中 (通用冷却 -  用于普通提问)
@@ -11,7 +11,18 @@ import { getJsonFromKv, putJsonToKv } from '../utils/utils';
  * @param {Array<number>} userWhitelist  用户白名单
  * @returns {Promise<boolean>}  true 表示处于冷却中，false 表示未冷却
  */
-export async function isGroupInCooldown(botConfigKvNamespace, cooldownDuration, groupId, userId, userWhitelist) {
+export async function isGroupInCooldown(
+	botConfigKvNamespace,
+	cooldownDuration,
+	groupId,
+	userId,
+	userWhitelistKey,
+	sendTelegramMessage,
+	replyToMessageId,
+	botToken,
+) {
+	const userWhitelist = (await getUserWhitelist(botConfigKvNamespace, userWhitelistKey)) || [];
+
 	if (userWhitelist && userWhitelist.includes(userId)) {
 		console.log(`白名单用户 ${userId}，跳过通用冷却检查`);
 		return false; // 白名单用户不受冷却限制
@@ -26,8 +37,12 @@ export async function isGroupInCooldown(botConfigKvNamespace, cooldownDuration, 
 	const elapsedMs = now - lastRequestTimestamp;
 
 	if (elapsedMs < cooldownMs) {
-		const remainingSeconds = Math.ceil((cooldownMs - elapsedMs) / 1000);
+		const remainingSeconds = Math.ceil((cooldownMs - (Date.now() - lastRequestTimestamp)) / 1000); // 计算剩余秒数
 		console.log(`群组 ${groupId} 通用冷却中，剩余 ${remainingSeconds} 秒`); //  !!!  区分日志：通用冷却  !!!
+
+		const replyText = `⏱️ 系统正在冷却中，请等待 ${remainingSeconds} 秒后重试！`; //  构建冷却提示消息
+		await sendTelegramMessage(botToken, groupId, replyText, replyToMessageId, 'HTML');
+
 		return true; // 处于冷却中
 	} else {
 		return false; // 未冷却
@@ -127,5 +142,3 @@ export function parseDurationToMs(durationString) {
 			return 90000; // 默认 1.5 分钟 (90000 毫秒)，如果单位无法识别
 	}
 }
-
-export async function groupIsInCooldown() {}

@@ -35,9 +35,9 @@ export async function updateUserContextHistory(
 	//  !!!  恢复为 messageContent 参数  !!!
 	const key = `context:${groupId}:${userId}`;
 	const previousHistory = await getUserContextHistory(contextKvNamespace, groupId, userId);
-	let history = [...previousHistory];
+	const history = [...previousHistory, ...messageContent];
 
-	history.push(messageContent); //  直接 push messageContent
+	// history.push(messageContent); //  直接 push messageContent
 
 	if (history.length > maxHistoryLength) {
 		history.shift();

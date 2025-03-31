@@ -3,63 +3,48 @@
 import { getJsonFromKv } from '../utils/utils';
 
 /**
- * 处理 JSON 文件消息并进行提问
+ * 处理通用文本文件消息并进行提问 (支持 txt, csv, md 等)
  * @param {object} message Telegram message 对象
  * @param {object} env Cloudflare Worker environment
  * @param {string} botName 机器人名称
  * @param {function} sendTelegramMessage 发送 Telegram 消息的函数
- * @param {function} getUserWhitelist 获取用户白名单的函数
  * @param {function} getJsonFromKv 工具函数，从 KV 获取 JSON 数据
  * @returns {Promise<void>}
  */
 
-export async function handleJsonFileMessage(env, message, sendTelegramMessage) {
-	console.log('开始处理 JSON 文件消息...');
+export async function handleTextFileMessage(env, botName, botToken, message, chatId, replyToMessageId, sendTelegramMessage) {
+	console.log('开始处理文本文件消息...');
 
-	const botName = env.TELEGRAM_BOT_NAME;
-	const botToken = env.BOT_TOKEN;
-
-	const groupId = message.chat.id;
-	const replyToMessageId = message.message_id;
 	const document = message.document;
-
 	const fileId = document.file_id;
 	const fileName = document.file_name;
 
-	console.log(`JSON 文件 file_id: ${fileId}, 文件名: ${fileName}`);
+	console.log(`文本文件 file_id: ${fileId}, 文件名: ${fileName}`);
 
 	try {
 		const fileInfoResponse = await fetch(`https://api.telegram.org/bot${botToken}/getFile?file_id=${fileId}`);
 		if (!fileInfoResponse.ok) {
-			console.error('获取 JSON 文件信息失败:', fileInfoResponse.status, fileInfoResponse.statusText);
-			await sendTelegramMessage(botToken, groupId, '😥 获取文件信息失败，请稍后重试。', replyToMessageId, 'HTML');
+			console.error('获取文本文件信息失败:', fileInfoResponse.status, fileInfoResponse.statusText);
+			await sendTelegramMessage(botToken, chatId, '😥 获取文件信息失败，请稍后重试。', replyToMessageId, 'HTML');
 			return;
 		}
-		const fileInfoJson = await fileInfoResponse.json();
-		if (!fileInfoJson.ok) {
-			console.error('获取 JSON 文件信息失败 (API error):', fileInfoJson);
-			await sendTelegramMessage(botToken, groupId, '😥 获取文件信息失败，请稍后重试。(API Error)', replyToMessageId, 'HTML');
+		const fileInfo = await fileInfoResponse.json();
+		if (!fileInfo.ok) {
+			console.error('获取文本文件信息失败 (API error):', fileInfo);
+			await sendTelegramMessage(botToken, chatId, '😥 获取文件信息失败，请稍后重试。(API Error)', replyToMessageId, 'HTML');
 			return;
 		}
-		const filePath = fileInfoJson.result.file_path;
+		const filePath = fileInfo.result.file_path;
 		const fileDownloadUrl = `https://api.telegram.org/file/bot${botToken}/${filePath}`;
 		console.log(`JSON 文件下载 URL: ${fileDownloadUrl}`);
 
-		const jsonFileResponse = await fetch(fileDownloadUrl);
-		if (!jsonFileResponse.ok) {
-			console.error('下载 JSON 文件失败:', jsonFileResponse.status, jsonFileResponse.statusText);
-			await sendTelegramMessage(botToken, groupId, '😥 下载文件失败，请稍后重试。', replyToMessageId, 'HTML');
+		const fileResponse = await fetch(fileDownloadUrl);
+		if (!fileResponse.ok) {
+			console.error('下载文本文件失败:', fileResponse.status, fileResponse.statusText);
+			await sendTelegramMessage(botToken, chatId, '😥 下载文件失败，请稍后重试。', replyToMessageId, 'HTML');
 			return;
 		}
-		const jsonText = await jsonFileResponse.text(); //  !!!  使用 text() 获取文件内容 !!!
-		let jsonData;
-		try {
-			jsonData = JSON.parse(jsonText); //  尝试解析 JSON
-		} catch (jsonError) {
-			console.error('解析 JSON 文件内容失败:', jsonError);
-			await sendTelegramMessage(botToken, groupId, '😥 文件内容不是有效的 JSON 格式，请检查文件。', replyToMessageId, 'HTML');
-			return;
-		}
+		const fileText = await fileResponse.text(); //  !!!  使用 text() 获取文件内容 !!!
 
 		const systemInitConfigKv = env.SYSTEM_INIT_CONFIG;
 		const systemPromptKey = env.SYSTEM_PROMPT_KV_KEY;
@@ -74,7 +59,7 @@ export async function handleJsonFileMessage(env, message, sendTelegramMessage) {
 
 		const userCaption = message.caption || '';
 		const processedCaption = userCaption.replace(new RegExp(`@${botName}`, 'gi'), '').trim(); //  去除 @botName
-		// console.log('JSON 文件内容：', jsonText);
+		// console.log('JSON 文件内容：', fileText);
 		//  构建 Gemini API 请求体
 		const geminiApiRequestBody = {
 			system_instruction: {
@@ -91,7 +76,7 @@ export async function handleJsonFileMessage(env, message, sendTelegramMessage) {
 							text: processedCaption,
 						},
 						{
-							text: `${fileName} -> ${jsonText}`,
+							text: `文件 ${fileName} 内容:\n\n${fileText}`,
 						},
 					],
 				},
@@ -129,7 +114,7 @@ export async function handleJsonFileMessage(env, message, sendTelegramMessage) {
 
 			if (!responseTextParts || responseTextParts.length === 0) {
 				console.warn('Gemini API 返回内容为空。');
-				await sendTelegramMessage(botToken, groupId, '🤔 Gemini 没有返回任何内容，请稍后重试。', replyToMessageId, 'HTML');
+				await sendTelegramMessage(botToken, chatId, '🤔 Gemini 没有返回任何内容，请稍后重试。', replyToMessageId, 'HTML');
 				return;
 			}
 
@@ -151,18 +136,19 @@ export async function handleJsonFileMessage(env, message, sendTelegramMessage) {
 				//  !!!  处理超长回复  !!!
 				const chunks = geminiReplyText.match(/[\s\S]{1,4000}/g) || []; //  分割成 4000 字符的块
 				for (const chunk of chunks) {
-					await sendTelegramMessage(botToken, groupId, chunk, replyToMessageId, 'HTML'); //  分块发送
+					await sendTelegramMessage(botToken, chatId, chunk, replyToMessageId, 'HTML'); //  分块发送
 				}
 			} else {
-				await sendTelegramMessage(botToken, groupId, geminiReplyText, replyToMessageId, 'HTML'); //  直接
+				await sendTelegramMessage(botToken, chatId, geminiReplyText, replyToMessageId, 'HTML'); //  直接
 			}
 		} catch (apiError) {
 			console.error('调用 Gemini API 失败:', apiError);
-			await sendTelegramMessage(botToken, groupId, '😥 调用 Gemini API 失败，请稍后重试。', replyToMessageId, 'HTML');
+			await sendTelegramMessage(botToken, chatId, '😥 调用 Gemini API 失败，请稍后重试。', replyToMessageId, 'HTML');
 			return;
 		}
 	} catch (error) {
-		console.error('处理 JSON 文件消息失败:', error);
-		await sendTelegramMessage(botToken, groupId, `😥 处理 JSON 文件消息时发生错误: ${error.message}`, replyToMessageId, 'HTML');
+		console.error('处理文本文件消息失败:', error);
+		await sendTelegramMessage(botToken, chatId, `😥 处理文本文件消息时发生错误: ${error.message}`, replyToMessageId, 'HTML');
 	}
+	return new Response('OK');
 }

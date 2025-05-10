@@ -12,7 +12,17 @@ import { getJsonFromKv } from '../utils/utils';
  * @returns {Promise<void>}
  */
 
-export async function handleTextFileMessage(env, botName, botToken, message, chatId, replyToMessageId, sendTelegramMessage) {
+export async function handleTextFileMessage(
+	env,
+	botName,
+	botToken,
+	botConfigKv,
+	message,
+	chatId,
+	replyToMessageId,
+	sendTelegramMessage,
+	recordGroupRequestTimestamp,
+) {
 	console.log('开始处理文本文件消息...');
 
 	const document = message.document;
@@ -51,11 +61,10 @@ export async function handleTextFileMessage(env, botName, botToken, message, cha
 		const knowledgeBaseKey = env.KNOWLEDGE_BASE_KV_KEY;
 
 		//  !!!  修改系统初始化消息获取和处理逻辑 (普通 @提问) - 分离知识库 !!!
-		const systemPromptData = (await getJsonFromKv(systemInitConfigKv, systemPromptKey)) || { systemPrompt: 'You are a helpful assistant.' }; //  获取系统提示词
-		const knowledgeBaseData = (await getJsonFromKv(systemInitConfigKv, knowledgeBaseKey)) || { knowledgeBase: '' }; //  !!! 获取知识库 !!!
+		const systemPromptData = (await systemInitConfigKv.get(systemPromptKey)) || 'You are a helpful assistant.'; //  获取系统提示词
+		const knowledgeBaseData = (await systemInitConfigKv.get(knowledgeBaseKey)) || { knowledgeBase: '' }; //  !!! 获取知识库 !!!
 
-		const combinedSystemPrompt = { ...systemPromptData, ...knowledgeBaseData }; //  !!! 合并提示词和知识库 !!!
-		const combinedSystemPromptText = JSON.stringify(combinedSystemPrompt);
+		const fullSystemPromptText = `${systemPromptData}\n${knowledgeBaseData}`; //  !!! 合并提示词和知识库 !!!
 
 		const userCaption = message.caption || '';
 		const processedCaption = userCaption.replace(new RegExp(`@${botName}`, 'gi'), '').trim(); //  去除 @botName
@@ -65,7 +74,7 @@ export async function handleTextFileMessage(env, botName, botToken, message, cha
 			system_instruction: {
 				parts: [
 					{
-						text: combinedSystemPromptText,
+						text: fullSystemPromptText,
 					},
 				],
 			},
@@ -97,7 +106,7 @@ export async function handleTextFileMessage(env, botName, botToken, message, cha
 
 		// console.log(JSON.stringify(geminiApiRequestBody, null, 2));
 
-		const modelName = env.DEFAULT_GEMINI_MODEL_NAME;
+		const modelName = env.GEMINI_MODEL_NAME;
 		const apiKey = env.GEMINI_API_KEY;
 
 		try {
@@ -141,6 +150,8 @@ export async function handleTextFileMessage(env, botName, botToken, message, cha
 			} else {
 				await sendTelegramMessage(botToken, chatId, geminiReplyText, replyToMessageId, 'HTML'); //  直接
 			}
+
+			await recordGroupRequestTimestamp(botConfigKv, chatId);
 		} catch (apiError) {
 			console.error('调用 Gemini API 失败:', apiError);
 			await sendTelegramMessage(botToken, chatId, '😥 调用 Gemini API 失败，请稍后重试。', replyToMessageId, 'HTML');

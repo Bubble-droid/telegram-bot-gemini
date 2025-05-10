@@ -137,7 +137,7 @@ async function sendSummaryToGemini(env, groupHistory, sendTelegramMessage) {
 		return null;
 	}
 
-	const modelName = env.DEFAULT_GEMINI_MODEL_NAME;
+	const modelName = env.GEMINI_MODEL_NAME;
 
 	try {
 		const systemPromptKv = env.SYSTEM_INIT_CONFIG;

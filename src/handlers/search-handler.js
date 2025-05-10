@@ -1,7 +1,7 @@
 // src/handlers/search-handler.js
 
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { getJsonFromKv, handleCooldownReplyAndCleanup, recordBotReplyMessage } from '../utils/utils';
+import { getJsonFromKv, handleCooldownReplyAndCleanup } from '../utils/utils';
 import { isGroupInCooldownForSearch, recordSearchGroupRequestTimestamp, parseDurationToMs } from '../utils/cooldown'; //  !!!  确保导入 recordSearchGroupRequestTimestamp 和 parseDurationToMs !!!
 import { formatGeminiReply } from '../utils/formatter';
 
@@ -49,12 +49,7 @@ export async function handleSearchCommand(message, env, botName, sendTelegramMes
 			'请在 <code>/search@' +
 			botName +
 			'</code> <b>命令后添加您的搜索关键词。</b>'; //  !!!  更新提示信息，包含 /search 命令用法  !!!
-		const emptySearchSendResult = await sendTelegramMessage(env.BOT_TOKEN, groupId, replyText, message.message_id, 'HTML'); //  发送回复
-
-		if (emptySearchSendResult.ok && emptySearchSendResult.message_id) {
-			//  !!!  记录空搜索关键词提示消息  !!!
-			await recordBotReplyMessage(env, botName, replyText, groupId); //  !!!  记录提示消息 !!!
-		}
+		await sendTelegramMessage(env.BOT_TOKEN, groupId, replyText, message.message_id, 'HTML'); //  发送回复
 
 		return new Response('OK');
 	}
@@ -150,7 +145,6 @@ export async function handleSearchCommand(message, env, botName, sendTelegramMes
 
 		await sendTelegramMessage(env.BOT_TOKEN, groupId, formattedReplyText, message.message_id, 'HTML'); //  回复消息
 
-		await recordBotReplyMessage(env, botName, formattedReplyText, groupId); //  调用 recordBotReplyMessage 记录
 		console.log('已记录搜索回复消息');
 
 		await recordSearchGroupRequestTimestamp(botConfigKv, groupId); //  记录搜索冷却时间  !!!  使用 recordSearchGroupRequestTimestamp  !!!

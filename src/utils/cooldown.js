@@ -24,7 +24,7 @@ export async function isGroupInCooldown(
 	const userWhitelist = (await getUserWhitelist(botConfigKvNamespace, userWhitelistKey)) || [];
 
 	if (userWhitelist && userWhitelist.includes(userId)) {
-		console.log(`白名单用户 ${userId}，跳过通用冷却检查`);
+		console.log(`白名单用户 ${userId}，跳过冷却检查`);
 		return false; // 白名单用户不受冷却限制
 	}
 
@@ -38,7 +38,7 @@ export async function isGroupInCooldown(
 
 	if (elapsedMs < cooldownMs) {
 		const remainingSeconds = Math.ceil((cooldownMs - (Date.now() - lastRequestTimestamp)) / 1000); // 计算剩余秒数
-		console.log(`群组 ${groupId} 通用冷却中，剩余 ${remainingSeconds} 秒`); //  !!!  区分日志：通用冷却  !!!
+		console.log(`群组 ${groupId} 冷却中，剩余 ${remainingSeconds} 秒`); //  !!!  区分日志：通用冷却  !!!
 
 		const replyText = `⏱️ 系统正在冷却中，请等待 ${remainingSeconds} 秒后重试！`; //  构建冷却提示消息
 		await sendTelegramMessage(botToken, groupId, replyText, replyToMessageId, 'HTML');
@@ -60,7 +60,7 @@ export async function recordGroupRequestTimestamp(botConfigKvNamespace, groupId)
 	const lastRequestTimestampKey = `cooldown:${groupId}`;
 	const now = Date.now();
 	await putJsonToKv(botConfigKvNamespace, lastRequestTimestampKey, now);
-	console.log(`群组 ${groupId} 通用冷却已激活，最后请求时间戳已更新`); //  !!!  区分日志：通用冷却  !!!
+	console.log(`群组 ${groupId} 冷却已激活，最后请求时间戳已更新`); //  !!!  区分日志：通用冷却  !!!
 }
 
 /**

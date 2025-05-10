@@ -39,7 +39,7 @@ export function formatGeminiReply(text) {
 
 		// 斜体格式化 (*italic*  =>  <i>italic</i>) -  同时支持 * 和 _ 斜体
 		formattedText = formattedText.replace(/\*(.*?)\*/g, '<i>$1</i>');
-		formattedText = formattedText.replace(/\_(.*?)\_/g, '<i>$1</i>'); //  !!!  新增 _ 斜体支持，统一使用 <i> 标签 !!!
+		// formattedText = formattedText.replace(/\_(.*?)\_/g, '<i>$1</i>'); //  !!!  新增 _ 斜体支持，统一使用 <i> 标签 !!!
 
 		// 下划线格式化 (__underline__  =>  <u>underline</u>) -  文档中 HTML 示例使用 <u>
 		formattedText = formattedText.replace(/<u>(.*?)<\/u>/gi, '<u>$1</u>'); //  !!!  确保已有的 <u> 标签不被错误替换 !!!

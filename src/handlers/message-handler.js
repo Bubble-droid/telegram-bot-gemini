@@ -1,8 +1,20 @@
 // src/handlers/message-handler.js
 
+import { getJsonFromKv, putJsonToKv } from '../utils/utils';
+import { recordGroupRequestTimestamp, isGroupInCooldown } from '../utils/cooldown';
 import { handleImageMessageForContext } from './image-handler';
-import { getJsonFromKv, putJsonToKv, recordBotReplyMessage } from '../utils/utils';
-import { parseDurationToMs } from '../utils/cooldown';
+import { getGeminiChatCompletion } from '../api/gemini-api';
+import { updateUserContextHistory, getUserContextHistory } from '../storage/context-storage';
+import {
+	setBotCommands,
+	setChatMenuButton,
+	sendTelegramMessage,
+	deleteTelegramMessage,
+	forwardTelegramMessage,
+	sendTelegramPhoto,
+} from '../api/telegram-api';
+import { scheduleDeletion } from '../utils/scheduler';
+
 /**
  * 提取消息内容 (文本和/或图片) 用于回复提问 -  彻底重构函数
  * @param {object} message Telegram message 对象
@@ -10,7 +22,7 @@ import { parseDurationToMs } from '../utils/cooldown';
  * @param {string} botName 机器人名称
  * @returns {Promise<object|null>}  messageContent 对象，如果消息不包含文本或图片则返回 null
  */
-export async function extractMessageContentForReply(message, env, botName) {
+export async function extractMessageContentForReply(env, message, botName) {
 	if (!message) {
 		return null;
 	}
@@ -59,15 +71,7 @@ export async function extractMessageContentForReply(message, env, botName) {
  * @param {function} formatGeminiReply 格式化 Gemini 回复函数
  * @returns {Promise<Response>}
  */
-export async function handleReplyToMessageQuestion(
-	message,
-	env,
-	botName,
-	sendTelegramMessage,
-	recordGroupRequestTimestamp,
-	getJsonFromKv,
-	getGeminiChatCompletion,
-) {
+export async function handleReplyToMessageQuestion(env, message, botName) {
 	console.log('开始处理回复消息提问 (不带上下文)...');
 
 	const groupId = message.chat.id; //  !!!  获取群组 ID
@@ -79,21 +83,20 @@ export async function handleReplyToMessageQuestion(
 	const knowledgeBaseKey = env.KNOWLEDGE_BASE_KV_KEY;
 
 	//  !!!  修改系统初始化消息获取和处理逻辑 (普通 @提问) - 分离知识库 !!!
-	const systemPromptData = (await getJsonFromKv(systemInitConfigKv, systemPromptKey)) || { systemPrompt: 'You are a helpful assistant.' }; //  获取系统提示词
-	const knowledgeBaseData = (await getJsonFromKv(systemInitConfigKv, knowledgeBaseKey)) || { knowledgeBase: '' }; //  !!! 获取知识库 !!!
+	const systemPromptData = (await systemInitConfigKv.get(systemPromptKey)) || 'You are a helpful assistant.'; //  获取系统提示词
+	// const knowledgeBaseData = (await systemInitConfigKv.get(knowledgeBaseKey)) || { knowledgeBase: '' }; //  !!! 获取知识库 !!!
 
-	const combinedSystemPrompt = { ...systemPromptData, ...knowledgeBaseData }; //  !!! 合并提示词和知识库 !!!
-	const combinedSystemPromptText = JSON.stringify(combinedSystemPrompt);
-	const systemInitMessages = [{ role: 'system', content: combinedSystemPromptText }];
+	// const fullSystemPromptText = systemPromptData; //  !!! 合并提示词和知识库 !!!
+	const systemInitMessages = [{ role: 'system', content: systemPromptData }];
 	// console.log("系统初始化消息 (回复 @提问, 分离知识库, 合并后):", systemInitMessages);
 
-	const modelName = env.DEFAULT_GEMINI_MODEL_NAME;
+	const modelName = env.GEMINI_MODEL_NAME;
 
 	const replyToMessage = message.reply_to_message;
 	const replyMessage = message;
 
-	let replyToMessageContent = await extractMessageContentForReply(replyToMessage, env, botName); //  !!!  提取被回复消息内容
-	let currentMessageContent = await extractMessageContentForReply(replyMessage, env, botName); //  !!!  提取当前回复消息内容，包含 @bot 的文本/图片
+	let replyToMessageContent = await extractMessageContentForReply(env, replyToMessage, botName); //  !!!  提取被回复消息内容
+	let currentMessageContent = await extractMessageContentForReply(env, replyMessage, botName); //  !!!  提取当前回复消息内容，包含 @bot 的文本/图片
 
 	let geminiMessages = [...systemInitMessages]; //  !!!  仅包含系统初始化消息，不包含上下文 !!!
 
@@ -121,7 +124,7 @@ export async function handleReplyToMessageQuestion(
 				const telegramMessageId = botReplySendMessage?.message_id;
 				if (telegramMessageId) {
 					const botMessageIdKey = `last_bot_message_id:${groupId}:${userId}`;
-					await putJsonToKv(botMessageIdsKv, botMessageIdKey, telegramMessageId); //  !!!  使用 BOT_MESSAGE_IDS KV  !!!
+					await putJsonToKv(botMessageIdsKv, botMessageIdKey, telegramMessageId, 604800); //  !!!  使用 BOT_MESSAGE_IDS KV  !!!
 					console.log(`存储 Bot 消息 ID (message_id: ${telegramMessageId}) 到 KV, key: ${botMessageIdKey}`);
 				}
 			}
@@ -130,11 +133,11 @@ export async function handleReplyToMessageQuestion(
 			const telegramMessageId = botReplySendMessage?.message_id;
 			if (telegramMessageId) {
 				const botMessageIdKey = `last_bot_message_id:${groupId}:${userId}`;
-				await putJsonToKv(botMessageIdsKv, botMessageIdKey, telegramMessageId); //  !!!  使用 BOT_MESSAGE_IDS KV  !!!
+				await putJsonToKv(botMessageIdsKv, botMessageIdKey, telegramMessageId, 604800); //  !!!  使用 BOT_MESSAGE_IDS KV  !!!
 				console.log(`存储 Bot 消息 ID (message_id: ${telegramMessageId}) 到 KV, key: ${botMessageIdKey}`);
 			}
 		}
-		await recordBotReplyMessage(env, botName, geminiReplyText, groupId); // 记录消息
+
 		await recordGroupRequestTimestamp(botConfigKv, groupId); //  记录冷却时间
 	} catch (error) {
 		console.error('调用 Gemini API 失败 (回复提问):', error);
@@ -162,22 +165,23 @@ export async function handleReplyToMessageQuestion(
  * @returns {Promise<Response>}
  */
 export async function handleBotMentionQuestion(
-	message,
 	env,
+	modelName,
+	botConfigKv,
+	contextKv,
+	imageDataKv,
+	botMessageIdsKv,
+	systemInitConfigKv,
+	systemPromptKey,
+	knowledgeBaseKey,
+	message,
+	chatId,
+	userId,
+	replyToMessageId,
+	botToken,
 	botName,
-	sendTelegramMessage,
-	recordGroupRequestTimestamp,
-	getJsonFromKv,
-	getUserContextHistory,
-	updateUserContextHistory,
-	getGeminiChatCompletion,
 ) {
-	const userId = message.from.id;
-	const groupId = message.chat.id;
-	const botConfigKv = env.BOT_CONFIG;
-
 	let messageContent;
-
 	if (message.text) {
 		const textWithoutBotName = message.text.replace(new RegExp(`@${botName}`, 'gi'), '').trim(); //  !!!  使用 RegExp 忽略大小写  !!!
 		messageContent = { role: 'user', content: textWithoutBotName };
@@ -190,22 +194,19 @@ export async function handleBotMentionQuestion(
 		return new Response('OK');
 	}
 
-	const contextKv = env.CONTEXT;
-	const modelName = env.DEFAULT_GEMINI_MODEL_NAME;
-	const systemInitConfigKv = env.SYSTEM_INIT_CONFIG;
-	const systemPromptKey = env.SYSTEM_PROMPT_KV_KEY;
-	const knowledgeBaseKey = env.KNOWLEDGE_BASE_KV_KEY;
-	const imageDataKv = env.IMAGE_DATA;
-	const botMessageIdsKv = env.BOT_MESSAGE_IDS; //  !!!  获取 BOT_MESSAGE_IDS KV Namespace  !!!
-	const contextHistory = await getUserContextHistory(contextKv, groupId, userId);
+	console.log(`开始处理 @ 提问...`);
+
+	const tempMessage = await sendTelegramMessage(botToken, chatId, `**思考中**...`, replyToMessageId, 'HTML');
+	const tempMessageId = tempMessage?.message_id;
+
+	const contextHistory = await getUserContextHistory(contextKv, chatId, userId);
 	// console.log('上下文历史记录 (提问前):', contextHistory);
 
-	const systemPromptData = (await getJsonFromKv(systemInitConfigKv, systemPromptKey)) || { systemPrompt: 'You are a helpful assistant.' }; //  获取系统提示词
-	const knowledgeBaseData = (await getJsonFromKv(systemInitConfigKv, knowledgeBaseKey)) || { knowledgeBase: '' }; //  !!! 获取知识库 !!!
+	const systemPromptData = (await systemInitConfigKv.get(systemPromptKey)) || `<system_context></system_context>`; //  获取系统提示词
+	// const knowledgeBaseData = (await systemInitConfigKv.get(knowledgeBaseKey)) || `<knowledge_base></knowledge_base>`; //  !!! 获取知识库 !!!
 
-	const combinedSystemPrompt = { ...systemPromptData, ...knowledgeBaseData }; //  !!! 合并提示词和知识库 !!!
-	const combinedSystemPromptText = JSON.stringify(combinedSystemPrompt);
-	const systemInitMessages = [{ role: 'system', content: combinedSystemPromptText }]; //  !!! 使用合并后的提示词 !!!
+	// const fullSystemPromptText = `${systemPromptData}\n${knowledgeBaseData}`; //  !!! 合并提示词和知识库 !!!
+	const systemInitMessages = [{ role: 'system', content: systemPromptData }]; //  !!! 使用合并后的提示词 !!!
 	// console.log("系统初始化消息 (普通 @提问, 分离知识库, 合并后):", systemInitMessages);
 
 	let processedMessages = [];
@@ -243,51 +244,51 @@ export async function handleBotMentionQuestion(
 	try {
 		geminiReplyText = await getGeminiChatCompletion(env, geminiMessages, modelName);
 
+		await deleteTelegramMessage(botToken, chatId, tempMessageId);
+
 		if (geminiReplyText.length > 4000) {
 			//  !!!  处理超长回复  !!!
 			const chunks = geminiReplyText.match(/[\s\S]{1,4000}/g) || []; //  分割成 4000 字符的块
 			for (const chunk of chunks) {
-				const botReplySendMessage = await sendTelegramMessage(env.BOT_TOKEN, groupId, chunk, message.message_id, 'HTML'); //  分块发送
+				const botReplySendMessage = await sendTelegramMessage(botToken, chatId, chunk, replyToMessageId, 'HTML'); //  分块发送
 				const telegramMessageId = botReplySendMessage?.message_id;
 				if (telegramMessageId) {
-					const botMessageIdKey = `last_bot_message_id:${groupId}:${userId}`;
-					await putJsonToKv(botMessageIdsKv, botMessageIdKey, telegramMessageId); //  !!!  使用 BOT_MESSAGE_IDS KV  !!!
+					const botMessageIdKey = `last_bot_message_id:${chatId}:${userId}`;
+					await putJsonToKv(botMessageIdsKv, botMessageIdKey, telegramMessageId, 604800); //  !!!  使用 BOT_MESSAGE_IDS KV  !!!
 					console.log(`存储 Bot 消息 ID (message_id: ${telegramMessageId}) 到 KV, key: ${botMessageIdKey}`);
 				}
 			}
 		} else {
-			const botReplySendMessage = await sendTelegramMessage(env.BOT_TOKEN, groupId, geminiReplyText, message.message_id, 'HTML'); //  直接发送
+			const botReplySendMessage = await sendTelegramMessage(botToken, chatId, geminiReplyText, replyToMessageId, 'HTML'); //  直接发送
 			const telegramMessageId = botReplySendMessage?.message_id;
 			if (telegramMessageId) {
-				const botMessageIdKey = `last_bot_message_id:${groupId}:${userId}`;
-				await putJsonToKv(botMessageIdsKv, botMessageIdKey, telegramMessageId); //  !!!  使用 BOT_MESSAGE_IDS KV  !!!
+				const botMessageIdKey = `last_bot_message_id:${chatId}:${userId}`;
+				await putJsonToKv(botMessageIdsKv, botMessageIdKey, telegramMessageId, 604800); //  !!!  使用 BOT_MESSAGE_IDS KV  !!!
 				console.log(`存储 Bot 消息 ID (message_id: ${telegramMessageId}) 到 KV, key: ${botMessageIdKey}`);
 			}
 		}
-
-		await recordBotReplyMessage(env, botName, geminiReplyText, groupId); //  调用
-		console.log('已记录 @ 提问的回复消息');
 
 		// console.log("Gemini API 流式响应处理完成，完整回复文本 (原始):", accumulatedReplyText); //  打印完整回复 (原始)
 		// console.log("Gemini API 流式响应处理完成，完整回复文本 (HTML 格式化后):", formatGeminiReply(accumulatedReplyText));
 
 		//  !!!  恢复为两次调用 updateUserContextHistory，分别记录 userMessage 和 botReply  !!!
 
-		// await updateUserContextHistory(contextKv, imageDataKv, groupId, userId, messageContent); //  记录用户消息
+		// await updateUserContextHistory(contextKv, imageDataKv, chatId, userId, messageContent); //  记录用户消息
 		const botReplyMessageContent = { role: 'assistant', content: geminiReplyText }; //  机器人回复消息内容
 
 		const context = [messageContent, botReplyMessageContent];
 
-		await updateUserContextHistory(contextKv, imageDataKv, groupId, userId, context); //  记录机器人回复消息
+		await updateUserContextHistory(contextKv, imageDataKv, chatId, userId, context); //  记录机器人回复消息
 
-		// console.log('上下文历史记录 (提问后):', await getUserContextHistory(contextKv, groupId, userId));
+		// console.log('上下文历史记录 (提问后):', await getUserContextHistory(contextKv, chatId, userId));
 
-		await recordGroupRequestTimestamp(botConfigKv, groupId);
+		await recordGroupRequestTimestamp(botConfigKv, chatId);
 	} catch (error) {
 		console.error('调用 Gemini API 失败:', error);
-		geminiReplyText = '🤖️ Gemini API 接口调用失败，请稍后再试'; //  修改错误提示信息，提示流式传输
-		await sendTelegramMessage(env.BOT_TOKEN, groupId, geminiReplyText, message.message_id, 'HTML'); //  发送错误消息
+		const replyText = '🤖️ Gemini API 接口调用失败，请稍后再试'; //  修改错误提示信息，提示流式传输
+		await sendTelegramMessage(botToken, chatId, replyText, replyToMessageId, 'HTML'); //  发送错误消息
 	}
+
 	return new Response('OK');
 }
 
@@ -297,24 +298,29 @@ export async function handleBotMentionQuestion(
 
 export async function handleUniversalMessage(
 	env,
-	botId,
+	modelName,
+	botConfigKv,
+	contextKv,
+	imageDataKv,
 	botMessageIdsKv,
+	systemInitConfigKv,
+	systemPromptKey,
+	knowledgeBaseKey,
+	userWhitelistKey,
+	cooldownDuration,
 	message,
 	chatId,
 	userId,
-	isInCooldown,
+	replyToMessageId,
+	botToken,
+	botId,
 	botName,
-	sendTelegramMessage,
-	recordGroupRequestTimestamp,
-	getJsonFromKv,
-	getUserContextHistory,
-	updateUserContextHistory,
-	getGeminiChatCompletion,
-	handleImageMessageForContext,
-	contextKv,
-	imageDataKv,
 ) {
 	console.log(`普通群组消息 (非 @ 提及, 也非命令, 图片消息: ${!!message.photo})`);
+
+	if (message.new_chat_participant) {
+		return await handleNewChatPtcp(env, botToken, botName, message, chatId);
+	}
 
 	//  !!!  连续对话检测 !!!
 	if (message.reply_to_message && message.reply_to_message.from.id === parseInt(botId)) {
@@ -327,6 +333,16 @@ export async function handleUniversalMessage(
 			console.log(`检测到用户 ${userId} 在群组 ${chatId} 的连续对话 (回复了 message_id: ${lastBotMessageId})`);
 			//  !!!  触发 @ 提问处理流程 (复用现有逻辑) !!!
 
+			const isInCooldown = await isGroupInCooldown(
+				botConfigKv,
+				cooldownDuration,
+				chatId,
+				userId,
+				userWhitelistKey,
+				sendTelegramMessage,
+				replyToMessageId,
+				botToken,
+			);
 			if (isInCooldown) {
 				return new Response('OK');
 			} else {
@@ -334,16 +350,24 @@ export async function handleUniversalMessage(
 			}
 
 			await handleBotMentionQuestion(
-				message,
 				env,
+				modelName,
+				botConfigKv,
+				contextKv,
+				imageDataKv,
+				botMessageIdsKv,
+				systemInitConfigKv,
+				systemPromptKey,
+				knowledgeBaseKey,
+				message,
+				chatId,
+				userId,
+				replyToMessageId,
+				botToken,
 				botName,
-				sendTelegramMessage,
-				recordGroupRequestTimestamp,
-				getJsonFromKv,
-				getUserContextHistory,
-				updateUserContextHistory,
-				getGeminiChatCompletion,
 			);
+
+			return new Response('OK');
 		} else {
 			console.log(
 				`用户 ${userId} 回复了 Bot 消息，但不是连续对话 (lastBotMessageId: ${lastBotMessageId}, reply_message_id: ${message.reply_to_message.message_id})`,
@@ -383,7 +407,6 @@ export async function handleUniversalMessage(
 		}
 		const content = [messageContent];
 		await updateUserContextHistory(contextKv, imageDataKv, chatId, userId, content);
-		console.log(`已更新用户 ${userId} 在群组 ${chatId} 的上下文`);
 	} else {
 		console.log('非文本或图片消息，不记录上下文');
 	}
@@ -394,84 +417,50 @@ export async function handleUniversalMessage(
  *  处理私聊消息
  */
 
-export async function handlePrivateMessage(
-	env,
-	botToken,
-	message,
-	chatId,
-	replyToMessageId,
-	botCommands,
-	setBotCommands,
-	setChatMenuButton,
-	sendTelegramMessage,
-	forwardTelegramMessage,
-) {
-	//  !!!  私聊消息处理 (保持不变)  !!!
+export async function handlePrivateMessage(env, botToken, message, chatId, messageId, userId) {
 	console.log('收到私聊消息');
 
-	//  !!!  命令检测判断 (私聊消息中也进行命令检测，但仅用于忽略，不实际处理命令) !!!
-	const botCommandPrefix = '/';
-	const messageText = message.text || message.caption || '';
-	let isPrivateChatCommand = false;
-	let privateChatCommand = '';
+	const adminId = Number(env.MAINTAINER_USER_IDS);
+	const deleteDelay = 10 * 1000;
 
-	if (message.entities) {
-		for (const entity of message.entities) {
-			if (entity.type === 'bot_command') {
-				//	设置 Bot 命令菜单
-				await setBotCommands(botToken, botCommands, chatId);
-				//	设置 Bot 对话菜单按钮
-				await setChatMenuButton(botToken, chatId);
+	try {
+		// 始终调度删除用户的原始消息
+		await scheduleDeletion(env, botToken, chatId, messageId, deleteDelay);
 
-				const commandText = messageText.substring(entity.offset, entity.offset + entity.length);
-				if (commandText.startsWith(botCommandPrefix)) {
-					isPrivateChatCommand = true;
-					privateChatCommand = commandText.substring(botCommandPrefix.length).toLowerCase(); //  !!!  提取命令名称  !!!
-					break;
-				}
-			}
+		// 非管理员时发送未授权提示并删除提示消息
+		if (userId !== adminId) {
+			const sent = await sendTelegramMessage(botToken, chatId, '⚠️ **未授权！**', messageId, 'HTML');
+			await scheduleDeletion(env, botToken, chatId, sent.message_id, deleteDelay);
 		}
+	} catch (error) {
+		console.error('handlePrivateMessage 处理失败：', error);
 	}
 
-	if (isPrivateChatCommand) {
-		console.log(`私聊消息为命令: /${privateChatCommand}`); //  更详细的日志
-
-		if (privateChatCommand === 'start') {
-			//  !!!  处理私聊 /start 命令  !!!
-			const replyText =
-				'👋 你好！请注意私聊通道只用于反馈<b>和 Bot 有关的问题</b>)，<b>无法进行提问！</b>\n\n' +
-				'请直接提交你的反馈内容，我会将你的消息转发给 Bot 的维护者。';
-			await sendTelegramMessage(botToken, chatId, replyText, replyToMessageId, 'HTML'); //  发送回复
-			console.log('已回复私聊 /start 命令');
-			return new Response('OK'); //  返回，不再进行后续处理
-		} else {
-			console.log(`私聊消息为其他命令 (/${privateChatCommand})，忽略处理`); //  日志更明确
-			return new Response('OK'); //  如果是其他命令，则忽略，直接返回
-		}
-	}
-
-	//  !!!  获取维护人员用户 ID 列表  !!!
-	const maintainerUserIdsString = env.MAINTAINER_USER_IDS || ''; //  获取环境变量，默认为空字符串
-	const maintainerUserIds = maintainerUserIdsString
-		.split(',')
-		.map((id) => parseInt(id.trim()))
-		.filter((id) => !isNaN(id)); //  逗号分隔，转换为数字，过滤无效 ID
-	console.log('维护人员用户 ID 列表:', maintainerUserIds);
-
-	if (maintainerUserIds.length > 0) {
-		//  !!!  使用 forwardMessage 方法转发消息  !!!
-		for (const maintainerId of maintainerUserIds) {
-			try {
-				await forwardTelegramMessage(botToken, maintainerId, message.chat.id, replyToMessageId); //  !!!  调用 forwardTelegramMessage 函数  !!!
-				console.log(`已转发私聊消息 (message_id: ${replyToMessageId}) 给维护人员 ${maintainerId}`);
-			} catch (error) {
-				console.error(`转发私聊消息 (message_id: ${replyToMessageId}) 给维护人员 ${maintainerId} 失败:`, error);
-			}
-		}
-	} else {
-		console.log('未配置维护人员用户 ID，不转发私聊消息');
-	}
-
-	console.log('私聊消息处理完成 (不回复用户, 使用 forwardMessage)'); //  明确指出不回复用户和使用 forwardMessage
-	return new Response('OK'); //  私聊消息不作其他处理，直接返回 OK，不回复用户
+	return new Response('ok');
 }
+
+const handleNewChatPtcp = async (env, botToken, botName, message, chatId) => {
+	const newChatPtcp = message.new_chat_participant;
+	try {
+		// 1. 发送欢迎消息
+		const ptcpId = newChatPtcp.id;
+		const ptcpFullName = `${newChatPtcp.first_name || ''} ${newChatPtcp.last_name || ''}`.trim();
+		const ptcpMention = `[${ptcpFullName}](tg://user?id=${ptcpId})`;
+		const welcomeText =
+			`欢迎  ${ptcpMention}  加入讨论组！\n\n` +
+			`* **提问前须知：**\n` +
+			`    - 遇到任何问题请先将 GUI 客户端和滚动发行升级到最新版。\n` +
+			`    - 请确保你当前使用的 GUI 版本，与所选内核兼容。\n` +
+			`    - 提问应直接发报错或者日志截图，而不是一堆意义不明的文字。\n` +
+			`    - 简单问题可先 @ 智能助手(${botName}) 提问，以获得及时解答。`;
+
+		const botSendMessage = await sendTelegramMessage(botToken, chatId, welcomeText, null, 'HTML');
+		const sendMessageId = botSendMessage.message_id;
+
+		await scheduleDeletion(env, botToken, chatId, sendMessageId, 90 * 1000);
+
+		return new Response('ok');
+	} catch (error) {
+		console.error('Error in handleNewChatPtcp:', error);
+	}
+};

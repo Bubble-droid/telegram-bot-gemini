@@ -1,6 +1,8 @@
 // src/handlers/image-handler.js
 
 import { base64Encode } from '../utils/utils';
+import { sendErrorNotification } from '../utils/utils';
+import { sendTelegramMessage } from '../api/telegram-api';
 
 /**
  * 处理图片消息并获取消息内容 (用于普通消息和回复提问) -  合并函数，添加 isReply 参数
@@ -61,7 +63,7 @@ export async function handleImageMessageForContext(message, env, isReply = false
 
 		if (!isReply) {
 			const imageKvKey = `image_base64_${crypto.randomUUID()}`;
-			await imageDataKv.put(imageKvKey, base64Image);
+			await imageDataKv.put(imageKvKey, base64Image, { expirationTtl: 604800 });
 			console.log(`图片 Base64 数据已存储到 KV, key: ${imageKvKey} (普通消息)`);
 			return {
 				role: 'user',
@@ -88,6 +90,12 @@ export async function handleImageMessageForContext(message, env, isReply = false
 		}
 	} catch (error) {
 		console.error(`处理图片消息失败 (普通消息/回复提问, isReply: ${isReply}):`, error);
+		await sendErrorNotification(
+			env,
+			error,
+			'src/handlers/image-handler.js - handleImageMessageForContext 函数 - 处理图片消息失败...',
+			sendTelegramMessage,
+		);
 		return { role: 'user', content: [{ type: 'text', text: message.caption || `(图片消息) - 处理错误: ${error.message}` }] };
 	}
 }

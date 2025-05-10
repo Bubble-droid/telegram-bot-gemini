@@ -4,7 +4,7 @@ import { getJsonFromKv, getUserWhitelist, sendErrorNotification, isUserBlacklist
 import { getGeminiChatCompletion } from './api/gemini-api';
 import { handleBotCommand, botCommands, handleCommandReplyAndCleanup } from './handlers/command-handler';
 import { handleImageMessageForContext } from './handlers/image-handler';
-import { getUserContextHistory, updateUserContextHistory } from './storage/context-storage';
+import { getUserContextHistory, updateUserContextHistory, clearGroupContextHistory } from './storage/context-storage';
 import { isGroupInCooldown, recordGroupRequestTimestamp, parseDurationToMs } from './utils/cooldown';
 import { recordGroupMessage } from './summary/summarization-handler';
 import { startDailyRecord, stopDailyRecordAndSummarize } from './summary/daily-summary-task';
@@ -17,57 +17,43 @@ import {
 import { setBotCommands, setChatMenuButton, sendTelegramMessage, deleteTelegramMessage, forwardTelegramMessage } from './api/telegram-api';
 import { handleTextFileMessage } from './handlers/document-handler';
 import { addSummaryGroupToWhitelist } from './summary/summary-config';
+import { TimerDO } from './utils/timer_do';
+
+export { TimerDO };
 
 export default {
 	async fetch(request, env) {
-		//  !!!  记录 Request 完整信息 (method 和 headers) !!!
-		console.log('收到 Webhook 请求:');
-		console.log(`  Method: ${request.method}`); //  记录请求方法
-		const headers = {};
-		request.headers.forEach((value, key) => {
-			//  !!!  使用 forEach 迭代 Headers 对象 !!!
-			headers[key] = value;
-		});
-		console.log('  Headers:', headers); //  记录请求头
+		console.log('\u6536\u5230 Webhook \u8BF7\u6C42:');
+		console.log(`Request method: ${request.method}`);
+		const headersObject = Object.fromEntries(request.headers);
+		const requestHeaders = JSON.stringify(headersObject, null, 2);
+		console.log(`Request headers: ${requestHeaders}`);
 
-		//  !!!  Webhook 验证  !!!
-		const secretToken = env.TELEGRAM_WEBHOOK_SECRET_TOKEN; //  从环境变量中获取 secret_token
+		const secretToken = env.TELEGRAM_WEBHOOK_SECRET_TOKEN;
 		if (secretToken) {
-			//  !!!  仅当配置了 secretToken 时才进行验证 !!!
-			const requestSecretToken = request.headers.get('X-Telegram-Bot-Api-Secret-Token');
+			const requestSecretToken = headersObject['x-telegram-bot-api-secret-token'];
 			if (requestSecretToken !== secretToken) {
-				console.warn('Webhook 验证失败：Secret Token 不正确或缺失，忽略请求'); //  警告日志 -  更明确指出忽略请求
-				return new Response('Unauthorized'); //  !!!  直接返回 200 OK 并忽略请求 !!!
+				console.warn(
+					'Webhook \u9A8C\u8BC1\u5931\u8D25\uFF1ASecret Token \u4E0D\u6B63\u786E\u6216\u7F3A\u5931\uFF0C\u5FFD\u7565\u8BF7\u6C42',
+				);
+				return new Response('Unauthorized', { status: 444 });
 			} else {
-				console.log('Webhook 验证成功：Secret Token 正确，继续处理请求'); //  成功日志 -  更明确
+				console.log('Webhook \u9A8C\u8BC1\u6210\u529F\uFF1ASecret Token \u6B63\u786E\uFF0C\u7EE7\u7EED\u5904\u7406\u8BF7\u6C42');
 			}
 		} else {
-			console.warn('TELEGRAM_WEBHOOK_SECRET_TOKEN 未配置，跳过 Webhook 验证 (生产环境强烈建议配置)'); //  警告日志
+			console.warn(
+				'TELEGRAM_WEBHOOK_SECRET_TOKEN \u672A\u914D\u7F6E\uFF0C\u8DF3\u8FC7 Webhook \u9A8C\u8BC1 (\u751F\u4EA7\u73AF\u5883\u5F3A\u70C8\u5EFA\u8BAE\u914D\u7F6E)',
+			);
 		}
-
-		// if (request.url.includes("test-start-daily-record")) { //  使用一个特殊的 URL 路径来触发测试
-		// 	console.log("手动触发 startDailyRecord 测试...");
-		// 	await startDailyRecord(env, sendTelegramMessage);
-		// 	return new Response('手动触发 startDailyRecord 测试完成，请查看日志');
-		// }
-
-		//  !!!  新增 stopDailyRecordAndSummarize 测试路径  !!!
-		// if (request.url.includes("test-stop-daily-summary")) {
-		// 	console.log("手动触发 stopDailyRecordAndSummarize 测试...");
-		// 	await stopDailyRecordAndSummarize(env, sendTelegramMessage);
-		// 	return new Response('手动触发 stopDailyRecordAndSummarize 测试完成，请查看日志');
-		// }
-
 		if (request.method === 'POST') {
 			try {
 				const update = await request.json();
-				console.log('收到 Telegram Update:', update);
-
+				console.log('\u6536\u5230 Telegram Update:', JSON.stringify(update, null, 2));
 				if (!update.message) {
-					console.log('Update 中不包含消息，忽略');
+					console.log('Update \u4E2D\u4E0D\u5305\u542B\u6D88\u606F\uFF0C\u5FFD\u7565');
 					return new Response('OK');
 				}
-
+				const modelName = env.GEMINI_MODEL_NAME;
 				const botToken = env.BOT_TOKEN;
 				const botId = env.BOT_ID;
 				const botName = env.TELEGRAM_BOT_NAME;
@@ -78,95 +64,67 @@ export default {
 				const userWhitelistKey = env.USER_WHITELIST_KV_KEY;
 				const cooldownDuration = env.COOLDOWN_DURATION;
 				const userBlacklistKey = env.USER_BLACKLIST_KV_KEY;
-
-				const message = update.message;
-				const chatType = message.chat.type;
-				const userId = message.from.id;
-				const chatId = message.chat.id;
-				const replyToMessageId = message.message_id;
-
-				const isBlacklisted = await isUserBlacklisted(botConfigKv, userBlacklistKey, userId); //  !!!  检查用户是否在黑名单 !!!
-
-				if (isBlacklisted) {
-					console.log(`用户 ${userId} 在黑名单中，拒绝处理`);
-					const replyText = '😅抱歉！你无权使用此机器人！'; //  黑名单回复消息
-					await sendTelegramMessage(botToken, chatId, replyText, replyToMessageId, 'HTML'); // 发送黑名单回复
-					return new Response('OK'); //  直接返回，不再进行任何处理
-				}
+				const taskQueueKv = env.TASK_QUEUE_KV;
+				const systemInitConfigKv = env.SYSTEM_INIT_CONFIG;
+				const systemPromptKey = env.SYSTEM_PROMPT_KV_KEY;
+				const knowledgeBaseKey = env.KNOWLEDGE_BASE_KV_KEY;
+				const message = update?.message;
+				const chatType = message?.chat.type;
+				const userId = message?.from.id;
+				const chatId = message?.chat.id;
+				const messageId = message?.message_id;
+				const isBlacklisted = await isUserBlacklisted(botConfigKv, userBlacklistKey, userId);
 
 				if (chatType === 'private') {
-					await handlePrivateMessage(
-						env,
-						botToken,
-						message,
-						chatId,
-						replyToMessageId,
-						botCommands,
-						setBotCommands,
-						setChatMenuButton,
-						sendTelegramMessage,
-						forwardTelegramMessage,
-					);
+					return await handlePrivateMessage(env, botToken, message, chatId, messageId, userId);
 				}
 
-				if (chatType !== 'private') {
-					//  !!!  确保只记录群组消息，排除私聊 !!!
-					await recordGroupMessage(env, message); //  !!!  提前到此处调用 recordGroupMessage !!!
-				}
-
-				//  !!!  命令检测 (优先级最高，在 @ 提及检测之前) !!!
 				let isBotCommand = false;
-				if (message.entities) {
-					for (const entity of message.entities) {
+				if (message.entities || message.caption_entities) {
+					const entitiesToCheck2 = message.entities ? message.entities : message.caption_entities ? message.caption_entities : [];
+					for (const entity of entitiesToCheck2) {
 						if (entity.type === 'bot_command') {
-							//	设置 Bot 命令菜单
-							await setBotCommands(env.BOT_TOKEN, botCommands, chatId);
-
+							await setBotCommands(botToken, botCommands, chatId);
 							isBotCommand = true;
-							break; //  找到 bot_command 即可跳出循环
+							break;
 						}
 					}
 				}
-
 				if (isBotCommand) {
-					console.log('检测到 Bot 命令，交给命令处理器...');
-					return handleBotCommand(
-						message,
+					console.log('\u68C0\u6D4B\u5230 Bot \u547D\u4EE4\uFF0C\u4EA4\u7ED9\u547D\u4EE4\u5904\u7406\u5668...');
+					return await handleBotCommand(
 						env,
-						env.TELEGRAM_BOT_NAME,
+						message,
+						userId,
+						chatId,
+						messageId,
+						botToken,
+						botName,
+						modelName,
+						contextKv,
+						imageDataKv,
+						botConfigKv,
+						cooldownDuration,
+						isGroupInCooldown,
+						userWhitelistKey,
+						userBlacklistKey,
 						sendTelegramMessage,
-						env.DEFAULT_GEMINI_MODEL_NAME,
 						deleteTelegramMessage,
-						env.TASK_QUEUE_KV,
+						recordGroupRequestTimestamp,
+						taskQueueKv,
 					);
 				}
-
-				//	群组白名单检测
 				const groupWhitelistKey = env.GROUP_WHITELIST_KV_KEY;
 				const groupWhitelist = (await getJsonFromKv(botConfigKv, groupWhitelistKey)) || [];
 				if (!groupWhitelist.includes(chatId)) {
-					console.log(`群组 ${chatId} 不在白名单中，忽略消息处理`);
+					console.log(`\u7FA4\u7EC4 ${chatId} \u4E0D\u5728\u767D\u540D\u5355\u4E2D\uFF0C\u5FFD\u7565\u6D88\u606F\u5904\u7406`);
 					return new Response('OK');
 				} else {
-					console.log(`群组 ${chatId} 在白名单中，继续处理消息`);
+					console.log(`\u7FA4\u7EC4 ${chatId} \u5728\u767D\u540D\u5355\u4E2D\uFF0C\u7EE7\u7EED\u5904\u7406\u6D88\u606F`);
 				}
-
-				const isInCooldown = await isGroupInCooldown(
-					botConfigKv,
-					cooldownDuration,
-					chatId,
-					userId,
-					userWhitelistKey,
-					sendTelegramMessage,
-					replyToMessageId,
-					botToken,
-				);
-
-				//  !!!  @bot 提问检测 (在命令检测之后)  !!!
 				let isBotMention = false;
 				const textToCheck = message.text || message.caption;
 				const entitiesToCheck = message.entities || message.caption_entities;
-
 				if (textToCheck && entitiesToCheck) {
 					for (const entity of entitiesToCheck) {
 						if (entity.type === 'mention') {
@@ -177,84 +135,102 @@ export default {
 						}
 					}
 				}
-
 				if (isBotMention) {
-					console.log('检测到 @ 提及');
-					if (!message.document && !message.text && !message.photo) {
-						console.log('消息既不是文本也不是图片，忽略');
-						const replyText = '😅 抱歉！暂不支持处理非文本文件、音频和视频内容。';
-						await sendTelegramMessage(env.BOT_TOKEN, chatId, replyText, message.message_id, 'HTML'); //  回复消息
+					console.log('\u68C0\u6D4B\u5230 @ \u63D0\u53CA');
+					if (isBlacklisted) {
+						console.log(`\u7528\u6237 ${userId} \u5728\u9ED1\u540D\u5355\u4E2D\uFF0C\u62D2\u7EDD\u5904\u7406`);
+						const replyText = '\u{1F605}\u62B1\u6B49\uFF01\u4F60\u65E0\u6743\u4F7F\u7528\u6B64\u673A\u5668\u4EBA\uFF01';
+						await sendTelegramMessage(botToken, chatId, replyText, messageId, 'HTML');
 						return new Response('OK');
 					}
-
+					if (!message.document && !message.text && !message.photo) {
+						console.log('\u6D88\u606F\u65E2\u4E0D\u662F\u6587\u672C\u4E5F\u4E0D\u662F\u56FE\u7247\uFF0C\u5FFD\u7565');
+						const replyText =
+							'\u{1F605} \u62B1\u6B49\uFF01\u6682\u4E0D\u652F\u6301\u5904\u7406\u975E\u6587\u672C\u6587\u4EF6\u3001\u97F3\u9891\u548C\u89C6\u9891\u5185\u5BB9\u3002';
+						await sendTelegramMessage(botToken, chatId, replyText, messageId, 'HTML');
+						return new Response('OK');
+					}
+					const isInCooldown = await isGroupInCooldown(
+						botConfigKv,
+						cooldownDuration,
+						chatId,
+						userId,
+						userWhitelistKey,
+						sendTelegramMessage,
+						messageId,
+						botToken,
+					);
 					if (isInCooldown) {
 						return new Response('OK');
 					} else {
-						console.log(`群组 ${chatId} 未冷却或用户在白名单中，继续处理提问`);
-					}
-
-					if (message.document) {
-						console.log(`检测到提问携带文本文件`);
-						await handleTextFileMessage(env, botName, botToken, message, chatId, replyToMessageId, sendTelegramMessage);
-						return new Response('OK');
-					}
-
-					if (message.reply_to_message) {
-						//  !!! 回复消息的判断 !!!
-						//  !!! 回复提问处理 (不带上下文) !!!
-						console.log('检测到回复提问 (不带上下文)');
-
-						await handleReplyToMessageQuestion(
-							message,
-							env,
-							botName,
-							sendTelegramMessage,
-							recordGroupRequestTimestamp,
-							getJsonFromKv,
-							getGeminiChatCompletion,
+						console.log(
+							`\u7FA4\u7EC4 ${chatId} \u672A\u51B7\u5374\u6216\u7528\u6237\u5728\u767D\u540D\u5355\u4E2D\uFF0C\u7EE7\u7EED\u5904\u7406\u63D0\u95EE`,
 						);
-					} else {
-						// @bot 提问处理 (流式响应，带上下文)
-						console.log(`检测到 @bot 提问 (图片消息: ${!!message.photo}) - (带上下文)`);
-						await handleBotMentionQuestion(
-							message,
+					}
+					if (message.document) {
+						console.log(`\u68C0\u6D4B\u5230\u63D0\u95EE\u643A\u5E26\u6587\u672C\u6587\u4EF6`);
+						return await handleTextFileMessage(
 							env,
 							botName,
+							botToken,
+							botConfigKv,
+							message,
+							chatId,
+							messageId,
 							sendTelegramMessage,
 							recordGroupRequestTimestamp,
-							getJsonFromKv,
-							getUserContextHistory,
-							updateUserContextHistory,
-							getGeminiChatCompletion,
+						);
+					}
+					if (message.reply_to_message) {
+						console.log('\u68C0\u6D4B\u5230\u56DE\u590D\u63D0\u95EE (\u4E0D\u5E26\u4E0A\u4E0B\u6587)');
+						return await handleReplyToMessageQuestion(env, message, botName);
+					} else {
+						console.log(`\u68C0\u6D4B\u5230 @bot \u63D0\u95EE (\u56FE\u7247\u6D88\u606F: ${!!message.photo}) - (\u5E26\u4E0A\u4E0B\u6587)`);
+						return await handleBotMentionQuestion(
+							env,
+							modelName,
+							botConfigKv,
+							contextKv,
+							imageDataKv,
+							botMessageIdsKv,
+							systemInitConfigKv,
+							systemPromptKey,
+							knowledgeBaseKey,
+							message,
+							chatId,
+							userId,
+							messageId,
+							botToken,
+							botName,
 						);
 					}
 				}
-
 				if (!isBotCommand && !isBotMention) {
-					await handleUniversalMessage(
+					return await handleUniversalMessage(
 						env,
-						botId,
+						modelName,
+						botConfigKv,
+						contextKv,
+						imageDataKv,
 						botMessageIdsKv,
+						systemInitConfigKv,
+						systemPromptKey,
+						knowledgeBaseKey,
+						userWhitelistKey,
+						cooldownDuration,
 						message,
 						chatId,
 						userId,
-						isInCooldown,
+						messageId,
+						botToken,
+						botId,
 						botName,
-						sendTelegramMessage,
-						recordGroupRequestTimestamp,
-						getJsonFromKv,
-						getUserContextHistory,
-						updateUserContextHistory,
-						getGeminiChatCompletion,
-						handleImageMessageForContext,
-						contextKv,
-						imageDataKv,
 					);
 				}
 				return new Response('OK');
 			} catch (error) {
-				console.error('解析 JSON 数据失败:', error);
-				await sendErrorNotification(env, error, 'index.js - fetch 函数 - 解析 JSON 数据失败', sendTelegramMessage);
+				console.error('\u89E3\u6790 JSON \u6570\u636E\u5931\u8D25:', error);
+				await sendErrorNotification(env, error, 'index.js - fetch \u51FD\u6570 - \u89E3\u6790 JSON \u6570\u636E\u5931\u8D25');
 				return new Response('Bad Request', { status: 400 });
 			}
 		} else {
@@ -262,21 +238,30 @@ export default {
 		}
 	},
 	// scheduled 事件监听器
-	async scheduled(event, env) {
-		console.log('Cron trigger event:', event); // 打印 event 对象，方便调试
-
-		switch (event.cron) {
-			case '59 15 * * *': // UTC 14:00 触发 stopDailyRecordAndSummarize
-				console.log('Cron trigger: stopDailyRecordAndSummarize');
-				await stopDailyRecordAndSummarize(env, sendTelegramMessage);
-				break;
-			case '0 16 * * *': // UTC 16:00 触发 startDailyRecord
-				console.log('Cron trigger: startDailyRecord');
-				await startDailyRecord(env, sendTelegramMessage);
-				break;
-			default:
-				console.log('Unknown cron trigger:', event.cron); // 记录未知的 cron 表达式
-				break;
-		}
-	},
+	// async scheduled(event, env, ctx) {
+	// 	console.log('Cron trigger event:', event); // 打印 event 对象，方便调试
+	// 	try {
+	// 		switch (event.cron) {
+	// 			// case '59 15 * * *': // UTC 14:00 触发 stopDailyRecordAndSummarize
+	// 			// 	// console.log('Cron trigger: stopDailyRecordAndSummarize');
+	// 			// 	// await stopDailyRecordAndSummarize(env, sendTelegramMessage);
+	// 			// 	break;
+	// 			// case '0 16 * * *': // UTC 16:00 触发 startDailyRecord
+	// 			// 	// console.log('Cron trigger: startDailyRecord');
+	// 			// 	// await startDailyRecord(env, sendTelegramMessage);
+	// 			// 	break;
+	// 			case '0 14 * * 7':
+	// 				await clearGroupContextHistory(env, env.BOT_TOKEN, env.CONTEXT, env.IMAGE_DATA, -1002033703290, null);
+	// 				break;
+	// 			default:
+	// 				console.log('Unknown cron trigger:', event.cron); // 记录未知的 cron 表达式
+	// 				break;
+	// 		}
+	// 		return new Response('OK');
+	// 	} catch (error) {
+	// 		console.error(`Errot in scheduled task '${event.cron}': ${error}`);
+	// 		await sendErrorNotification(env, error, `index.js - scheduled - Errot in scheduled task '${event.cron}'`);
+	// 		return new Response('Bad');
+	// 	}
+	// },
 };

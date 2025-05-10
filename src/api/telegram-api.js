@@ -111,6 +111,7 @@ export async function sendTelegramMessage(botToken, chatId, text, replyToMessage
 		text: htmlText,
 		reply_to_message_id: replyToMessageId,
 		parse_mode: parseMode,
+		link_preview_options: { is_disabled: true },
 	};
 
 	try {
@@ -177,6 +178,85 @@ async function sendTelegramMessageMarkdownV2(botToken, chatId, text, replyToMess
 	} catch (error) {
 		console.error('发送 Telegram MarkdownV2 消息时发生错误:', error);
 		return { ok: false, error }; //  返回包含错误信息的对象
+	}
+}
+
+/**
+ ** 发送 Telegram 图片消息 -  新增 sendTelegramPhoto 函数
+ * @param {string} botToken
+ * @param {number} chatId
+ * @param {string} base64Image  Base64 编码的图片数据
+ * @param {number} replyToMessageId  (optional) 如果需要回复某条消息，则指定 message_id
+ * @param {string} caption  (optional) 图片描述
+ * @returns {Promise<Response>}  返回 response 对象
+ */
+export async function sendTelegramPhoto(botToken, chatId, base64Image, replyToMessageId = null, caption = null) {
+	//  !!!  修改 sendTelegramPhoto 函数 - 使用 multipart/form-data 发送图片二进制数据  !!!
+	const apiUrl = `https://api.telegram.org/bot${botToken}/sendPhoto`;
+
+	try {
+		//  !!!  将 Base64 编码的图片数据解码为二进制数据  !!!
+		const binaryImageData = base64Decode(base64Image);
+		if (!binaryImageData) {
+			console.error('Base64 图片解码失败');
+			return { ok: false, error: new Error('Base64 图片解码失败') };
+		}
+
+		//  !!!  构建 multipart/form-data 请求体  !!!
+		const formData = new FormData();
+		formData.append('chat_id', chatId);
+		if (replyToMessageId) {
+			formData.append('reply_to_message_id', replyToMessageId);
+		}
+		if (caption) {
+			formData.append('caption', caption); //  !!!  添加 caption 参数 !!!
+		}
+		//  !!!  直接 append 二进制图片数据，字段名为 'photo', 文件名为 'image.png' (可自定义), MIME 类型为 'image/png'  !!!
+		formData.append('photo', new Blob([binaryImageData], { type: 'image/png' }), 'image.png'); //  !!!  修正文件名和 MIME 类型 !!!
+
+		//  !!!  发送 multipart/form-data 请求  !!!
+		const response = await fetch(apiUrl, {
+			method: 'POST',
+			headers: {
+				//  !!!  Content-Type  由 FormData 自动设置，无需手动指定 !!!
+				// 'Content-Type': 'multipart/form-data',
+			},
+
+			body: formData, //  !!!  直接使用 FormData 对象作为 body  !!!
+		});
+
+		if (!response.ok) {
+			const error = await response.json();
+			console.error('发送 Telegram 图片消息失败:', error);
+			return { ok: false, error }; //  返回包含错误信息的对象
+		} else {
+			const result = await response.json();
+			console.log('成功发送 Telegram 图片消息, message_id:', result.result.message_id); //  打印 message_id
+			return { ok: true, message_id: result.result.message_id }; //  返回包含 message_id 的对象
+		}
+	} catch (error) {
+		console.error('发送 Telegram 图片消息时发生错误:', error);
+		return { ok: false, error }; //  返回包含错误信息的对象
+	}
+}
+
+/**
+ * Base64 解码函数 -  用于将 Base64 字符串解码为 Uint8Array 二进制数据
+ * @param {string} base64String  Base64 字符串
+ * @returns {Uint8Array|null}  Uint8Array 二进制数据，解码失败返回 null
+ */
+function base64Decode(base64String) {
+	try {
+		const binaryString = atob(base64String);
+		const len = binaryString.length;
+		const bytes = new Uint8Array(len);
+		for (let i = 0; i < len; i++) {
+			bytes[i] = binaryString.charCodeAt(i);
+		}
+		return bytes;
+	} catch (error) {
+		console.error('Base64 解码失败:', error);
+		return null;
 	}
 }
 
